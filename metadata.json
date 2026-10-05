@@ -1,0 +1,8 @@
+{
+  "name": "Mahfaza.co — Akademik İşletim Sistemi",
+  "description": "Planını Kur. Disiplinini Koru. Hedefine Ulaş. Mahfaza.co tam teşekküllü, oyunlaştırılmış akademik yönetim ve rehberlik platformu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
