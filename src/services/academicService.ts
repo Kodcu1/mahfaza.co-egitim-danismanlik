@@ -29,13 +29,19 @@ export const academicService = {
   },
 
   async getSubjects(): Promise<Subject[]> {
-    const { data, error } = await supabase
-      .from('subjects')
-      .select('id, name, code, created_at')
-      .order('name', { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from('subjects')
+        .select('id, name, code, created_at')
+        .order('name', { ascending: true });
 
-    if (error) throw new Error(error.message);
-    return (data || []) as Subject[];
+      if (error || !data) {
+        return [];
+      }
+      return data as Subject[];
+    } catch {
+      return [];
+    }
   },
 
   async createSubject(name: string, code: string): Promise<Subject> {

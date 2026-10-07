@@ -48,7 +48,7 @@ export interface Subject {
   id: string;
   name: string;
   code: string;
-  created_at: string;
+  created_at?: string;
 }
 
 export interface ScheduleItem {
@@ -134,19 +134,36 @@ export interface Exam {
   class_name?: string;
 }
 
+export interface BranchResult {
+  name: string;
+  correct: number;
+  wrong: number;
+  empty: number;
+  net: number;
+}
+
 export interface ExamResult {
   id: string;
-  exam_id: string;
+  exam_id?: string;
   student_id: string;
-  turkish_net: number;
-  math_net: number;
-  social_net: number;
-  science_net: number;
+  exam_type?: 'TYT' | 'AYT' | 'LGS';
+  exam_name?: string;
+  exam_date?: string;
+  total_questions?: number;
+  total_correct?: number;
+  total_wrong?: number;
+  total_empty?: number;
+  turkish_net?: number;
+  math_net?: number;
+  social_net?: number;
+  science_net?: number;
   total_net: number;
   score: number;
   rank?: number | null;
+  notes?: string | null;
+  branches?: BranchResult[];
   created_at: string;
-  updated_at: string;
+  updated_at?: string;
   exam?: Exam;
   student?: Profile;
 }

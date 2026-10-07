@@ -88,8 +88,8 @@ export const AdminContentPage: React.FC = () => {
       setContents(items);
       setSubjects(subs);
       if (subs.length > 0 && !subjectId) setSubjectId(subs[0].id);
-    } catch (err) {
-      console.error('Error loading content:', err);
+    } catch {
+      // Graceful fallback for offline or schema cache synchronization
     } finally {
       setLoading(false);
     }

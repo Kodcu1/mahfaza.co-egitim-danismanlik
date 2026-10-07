@@ -2,65 +2,54 @@ import { supabase } from '../lib/supabase';
 import { notificationService } from './notificationService';
 import { BranchTeacherFeedback } from '../types';
 
-const LOCAL_STORAGE_KEY = 'mahfaza_branch_teacher_feedbacks';
-
-function getStoredFeedbacks(): BranchTeacherFeedback[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveStoredFeedbacks(feedbacks: BranchTeacherFeedback[]) {
-  try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(feedbacks));
-  } catch {
-    // ignore
-  }
-}
-
 export const branchTeacherService = {
   /**
-   * Get all branch teacher feedbacks for a specific student
+   * Get all branch teacher feedbacks for a specific student from parent_meetings table
    */
   async getFeedbacksForStudent(studentId: string): Promise<BranchTeacherFeedback[]> {
-    let remoteFeedbacks: BranchTeacherFeedback[] = [];
-
     try {
       const { data: meetings, error } = await supabase
         .from('parent_meetings')
-        .select('id, branch_evaluations')
-        .eq('student_id', studentId);
+        .select('id, teacher_opinions, meeting_date, coach_id, created_at')
+        .eq('student_id', studentId)
+        .order('meeting_date', { ascending: false });
 
-      if (!error && meetings) {
-        for (const m of meetings) {
-          if (Array.isArray(m.branch_evaluations)) {
-            remoteFeedbacks.push(...(m.branch_evaluations as BranchTeacherFeedback[]));
+      if (error || !meetings) {
+        return [];
+      }
+
+      const results: BranchTeacherFeedback[] = [];
+      for (const m of meetings) {
+        if (!m.teacher_opinions) continue;
+        try {
+          const parsed = JSON.parse(m.teacher_opinions);
+          if (Array.isArray(parsed)) {
+            results.push(...parsed);
+          } else if (parsed && typeof parsed === 'object') {
+            results.push(parsed);
           }
+        } catch {
+          // Plain text format
+          results.push({
+            id: m.id,
+            student_id: studentId,
+            coach_id: m.coach_id || null,
+            subject: 'Branş Görüşü',
+            teacher_name: 'Öğretmen',
+            topic: '',
+            academic_status: 'İyi',
+            opinion: m.teacher_opinions,
+            recommendations: '',
+            date: m.meeting_date || m.created_at?.slice(0, 10),
+            created_at: m.created_at,
+          });
         }
       }
-    } catch (err) {
-      console.warn('Error fetching remote branch feedbacks:', err);
-    }
 
-    // Merge with local persistent storage
-    const stored = getStoredFeedbacks().filter((f) => f.student_id === studentId);
-    const idMap = new Map<string, BranchTeacherFeedback>();
-
-    for (const item of remoteFeedbacks) {
-      if (item && item.id) idMap.set(item.id, item);
+      return results;
+    } catch {
+      return [];
     }
-    for (const item of stored) {
-      if (item && item.id && !idMap.has(item.id)) {
-        idMap.set(item.id, item);
-      }
-    }
-
-    return Array.from(idMap.values()).sort(
-      (a, b) => new Date(b.date || b.created_at).getTime() - new Date(a.date || a.created_at).getTime()
-    );
   },
 
   /**
@@ -91,50 +80,23 @@ export const branchTeacherService = {
       created_at: new Date().toISOString(),
     };
 
-    // 1. Persist to Supabase parent_meetings record
     try {
-      const { data: meetings } = await supabase
+      await supabase
         .from('parent_meetings')
-        .select('id, branch_evaluations')
-        .eq('student_id', payload.student_id)
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      if (meetings && meetings.length > 0) {
-        const targetMeeting = meetings[0];
-        const existing = Array.isArray(targetMeeting.branch_evaluations)
-          ? targetMeeting.branch_evaluations
-          : [];
-        const updated = [newFeedback, ...existing];
-
-        await supabase
-          .from('parent_meetings')
-          .update({ branch_evaluations: updated })
-          .eq('id', targetMeeting.id);
-      } else {
-        // Create an initial parent_meeting entry to house branch evaluations
-        await supabase
-          .from('parent_meetings')
-          .insert({
-            student_id: payload.student_id,
-            coach_id: payload.coach_id || null,
-            meeting_date: newFeedback.date,
-            meeting_type: 'online',
-            status: 'completed',
-            branch_evaluations: [newFeedback],
-            academic_evaluation: `${payload.subject} branş değerlendirmesi eklendi.`,
-          });
-      }
-    } catch (dbErr) {
-      console.warn('Could not sync branch feedback to parent_meetings table:', dbErr);
+        .insert({
+          student_id: payload.student_id,
+          coach_id: payload.coach_id || null,
+          meeting_date: newFeedback.date,
+          meeting_type: 'online',
+          status: 'completed',
+          teacher_opinions: JSON.stringify([newFeedback]),
+          academic_evaluation: `${payload.subject} branş değerlendirmesi eklendi.`,
+        });
+    } catch {
+      // ignore
     }
 
-    // 2. Persist locally
-    const all = getStoredFeedbacks();
-    all.unshift(newFeedback);
-    saveStoredFeedbacks(all);
-
-    // 3. Notify student
+    // Notify student
     try {
       await notificationService.createNotification({
         user_id: payload.student_id,
@@ -155,27 +117,13 @@ export const branchTeacherService = {
    */
   async deleteFeedback(feedbackId: string, studentId: string): Promise<void> {
     try {
-      const { data: meetings } = await supabase
+      await supabase
         .from('parent_meetings')
-        .select('id, branch_evaluations')
+        .delete()
+        .eq('id', feedbackId)
         .eq('student_id', studentId);
-
-      if (meetings) {
-        for (const m of meetings) {
-          if (Array.isArray(m.branch_evaluations)) {
-            const filtered = m.branch_evaluations.filter((f: any) => f.id !== feedbackId);
-            await supabase
-              .from('parent_meetings')
-              .update({ branch_evaluations: filtered })
-              .eq('id', m.id);
-          }
-        }
-      }
     } catch {
       // ignore
     }
-
-    const all = getStoredFeedbacks().filter((f) => f.id !== feedbackId);
-    saveStoredFeedbacks(all);
   },
 };

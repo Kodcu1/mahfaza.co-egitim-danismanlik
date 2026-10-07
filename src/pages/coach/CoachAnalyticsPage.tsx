@@ -102,7 +102,7 @@ export const CoachAnalyticsPage: React.FC = () => {
             Portföy Analitiği & Raporlama
           </span>
           <h1 className="text-xl sm:text-2xl font-bold text-zinc-100 tracking-tight mt-0.5">
-            AI Analiz & Raporlama
+            Veri Tabanlı Akademik Analiz & Raporlama
           </h1>
           <p className="text-xs text-zinc-400 mt-1">
             Atanmış danışanlarınızın gerçek veritabanı net trendleri, çalışma süreleri ve görev tamamlama başarı grafiği.

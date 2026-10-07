@@ -26,16 +26,34 @@ export const StudentSessionsPage: React.FC = () => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user?.id) return;
-    Promise.all([
-      academicService.getSubjects(),
-      xpService.getStudentXP(user.id),
-    ]).then(([subs, xp]) => {
-      setSubjects(subs);
-      if (subs.length > 0) setSelectedSubject(subs[0].id);
-      setXpData(xp);
-      setLoading(false);
-    });
+    let isMounted = true;
+    const timeout = setTimeout(() => {
+      if (isMounted) setLoading(false);
+    }, 2000);
+
+    async function init() {
+      try {
+        const subs = await academicService.getSubjects();
+        if (isMounted) {
+          setSubjects(subs);
+          if (subs.length > 0) setSelectedSubject(subs[0].id);
+        }
+        if (user?.id) {
+          const xp = await xpService.getStudentXP(user.id);
+          if (isMounted) setXpData(xp);
+        }
+      } catch (err) {
+        console.error('Session init error:', err);
+      } finally {
+        clearTimeout(timeout);
+        if (isMounted) setLoading(false);
+      }
+    }
+    init();
+    return () => {
+      isMounted = false;
+      clearTimeout(timeout);
+    };
   }, [user?.id]);
 
   useEffect(() => {

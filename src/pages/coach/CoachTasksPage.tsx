@@ -27,8 +27,8 @@ export const CoachTasksPage: React.FC = () => {
   const [assignedStudents, setAssignedStudents] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Filter State
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending_review' | 'pending' | 'approved'>('all');
+  // Filter State: active/pending on main screen by default, completed/approved in separate tab
+  const [statusFilter, setStatusFilter] = useState<'active' | 'approved' | 'all'>('active');
 
   // Rejection Modal State
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
@@ -160,12 +160,16 @@ export const CoachTasksPage: React.FC = () => {
   }
 
   const filteredTasks = tasks.filter((t) => {
+    const isApproved = t.status === 'approved' || t.status === 'verified';
     if (statusFilter === 'all') return true;
-    if (statusFilter === 'approved') return t.status === 'approved' || t.status === 'verified';
-    if (statusFilter === 'pending_review') return t.status === 'pending_review' || t.status === 'submitted' || t.status === 'completed';
-    if (statusFilter === 'pending') return t.status === 'pending';
-    return true;
+    if (statusFilter === 'approved') return isApproved;
+    // 'active' shows both in-progress / not yet completed tasks and those pending review
+    return !isApproved;
   });
+
+  const activeCount = tasks.filter((t) => t.status !== 'approved' && t.status !== 'verified').length;
+  const approvedCount = tasks.filter((t) => t.status === 'approved' || t.status === 'verified').length;
+  const pendingReviewCount = tasks.filter((t) => t.status === 'pending_review' || t.status === 'submitted').length;
 
   return (
     <div className="space-y-6">
@@ -195,33 +199,54 @@ export const CoachTasksPage: React.FC = () => {
         </Button>
       </div>
 
-      {/* Filter Tabs */}
+      {/* Filter Tabs: Active/Pending on main screen, completed/approved in separate tab */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1">
-        {(['all', 'pending_review', 'pending', 'approved'] as const).map((st) => {
-          const pendingReviewCount = tasks.filter((t) => t.status === 'pending_review' || t.status === 'submitted' || t.status === 'completed').length;
-          const pendingCount = tasks.filter((t) => t.status === 'pending').length;
-          const approvedCount = tasks.filter((t) => t.status === 'approved' || t.status === 'verified').length;
+        <button
+          onClick={() => setStatusFilter('active')}
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+            statusFilter === 'active'
+              ? 'bg-zinc-800 text-amber-400 shadow-xs'
+              : 'text-zinc-400 hover:text-zinc-200'
+          }`}
+        >
+          <span>Aktif & Bekleyen Görevler</span>
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700 text-amber-300">
+            {activeCount}
+          </span>
+          {pendingReviewCount > 0 && (
+            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 animate-pulse">
+              {pendingReviewCount} Onay Bekliyor
+            </span>
+          )}
+        </button>
 
-          return (
-            <button
-              key={st}
-              onClick={() => setStatusFilter(st)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                statusFilter === st
-                  ? 'bg-zinc-800 text-amber-400 shadow-xs'
-                  : 'text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              {st === 'all'
-                ? `Tüm Görevler (${tasks.length})`
-                : st === 'pending_review'
-                ? `Onay Bekleyenler (${pendingReviewCount})`
-                : st === 'pending'
-                ? `Teslim Bekleyen (${pendingCount})`
-                : `Onaylananlar (${approvedCount})`}
-            </button>
-          );
-        })}
+        <button
+          onClick={() => setStatusFilter('approved')}
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+            statusFilter === 'approved'
+              ? 'bg-zinc-800 text-emerald-400 shadow-xs'
+              : 'text-zinc-400 hover:text-zinc-200'
+          }`}
+        >
+          <span>Tamamlanan & Onaylananlar</span>
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700 text-emerald-300">
+            {approvedCount}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setStatusFilter('all')}
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+            statusFilter === 'all'
+              ? 'bg-zinc-800 text-zinc-100 shadow-xs'
+              : 'text-zinc-400 hover:text-zinc-200'
+          }`}
+        >
+          <span>Tüm Görevler</span>
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700 text-zinc-300">
+            {tasks.length}
+          </span>
+        </button>
       </div>
 
       {tasks.length === 0 ? (

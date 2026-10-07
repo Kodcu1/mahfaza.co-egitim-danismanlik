@@ -1,30 +1,6 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { Profile } from '../types';
 
-// In-memory / persistent pairing cache to handle database pairing gracefully
-const LOCAL_PAIRINGS_KEY = 'mahfaza_coach_student_pairings';
-
-function getStoredPairings(): Record<string, string[]> {
-  try {
-    const raw = localStorage.getItem(LOCAL_PAIRINGS_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveStoredPairings(pairings: Record<string, string[]>) {
-  try {
-    localStorage.setItem(LOCAL_PAIRINGS_KEY, JSON.stringify(pairings));
-  } catch {
-    // ignore
-  }
-}
-
-// Ensure demo coach is paired with demo student
-const DEMO_COACH_ID = '1672a9db-3296-4583-b226-11ac5d1eb5cf';
-const DEMO_STUDENT_ID = '06cf9897-7ef1-440f-9a1d-4703d4d66816';
-
 export const relationshipService = {
   async getProfilesByRole(role: string): Promise<Profile[]> {
     if (!isSupabaseConfigured) return [];
@@ -58,113 +34,93 @@ export const relationshipService = {
   },
 
   /**
-   * Get students assigned to a coach with full profile resolution and demo pairing
+   * Get students assigned to a coach directly from authoritative Supabase coach_student_links table
    */
   async getCoachAssignedStudents(coachId: string): Promise<Profile[]> {
-    let studentIds: string[] = [];
+    if (!isSupabaseConfigured) return [];
 
-    // 1. Try remote database table coach_students
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await supabase
-          .from('coach_students')
-          .select('student_id')
-          .eq('coach_id', coachId);
+    try {
+      const { data: links, error: linkErr } = await supabase
+        .from('coach_student_links')
+        .select('student_id')
+        .eq('coach_id', coachId)
+        .eq('status', 'active');
 
-        if (!error && data) {
-          studentIds = data.map((d: any) => d.student_id);
-        }
-      } catch {
-        // Table may be in migration process
+      if (linkErr || !links || links.length === 0) {
+        return [];
       }
-    }
 
-    // 2. Include stored local pairings
-    const stored = getStoredPairings();
-    if (stored[coachId]) {
-      studentIds = Array.from(new Set([...studentIds, ...stored[coachId]]));
-    }
+      const studentIds = links.map((l: any) => l.student_id).filter(Boolean);
+      if (studentIds.length === 0) return [];
 
-    // 3. For Demo Coach (demo.koc@mahfaza.co or DEMO_COACH_ID), ensure Demo Student is linked in database and included
-    if (isSupabaseConfigured) {
-      try {
-        let isDemoCoach = coachId === DEMO_COACH_ID;
-        if (!isDemoCoach) {
-          const { data: coachProf } = await supabase
-            .from('profiles')
-            .select('email')
-            .eq('id', coachId)
-            .maybeSingle();
-          if (coachProf?.email === 'demo.koc@mahfaza.co') {
-            isDemoCoach = true;
-          }
-        }
-
-        if (isDemoCoach) {
-          const { data: studentProf } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('email', 'demo.ogrenci@mahfaza.co')
-            .maybeSingle();
-
-          const realDemoStudentId = studentProf?.id || DEMO_STUDENT_ID;
-          if (!studentIds.includes(realDemoStudentId)) {
-            studentIds.push(realDemoStudentId);
-          }
-
-          // Ensure real database relationship row exists in coach_students table
-          await supabase
-            .from('coach_students')
-            .upsert({ coach_id: coachId, student_id: realDemoStudentId }, { onConflict: 'coach_id,student_id' });
-        }
-      } catch {
-        if (coachId === DEMO_COACH_ID && !studentIds.includes(DEMO_STUDENT_ID)) {
-          studentIds.push(DEMO_STUDENT_ID);
-        }
-      }
-    } else {
-      if (coachId === DEMO_COACH_ID && !studentIds.includes(DEMO_STUDENT_ID)) {
-        studentIds.push(DEMO_STUDENT_ID);
-      }
-    }
-
-    if (studentIds.length === 0) {
-      return [];
-    }
-
-    // 4. Fetch real profiles for all studentIds from Supabase profiles table
-    if (isSupabaseConfigured) {
       const { data: profiles, error: pError } = await supabase
         .from('profiles')
         .select('*')
         .in('id', studentIds);
 
-      if (!pError && profiles && profiles.length > 0) {
-        return profiles.map((p: any) => ({
-          ...p,
-          first_name: p.first_name || (p.full_name ? p.full_name.split(' ')[0] : (p.name ? p.name.split(' ')[0] : 'Öğrenci')),
-          last_name: p.last_name || (p.full_name ? p.full_name.split(' ').slice(1).join(' ') : (p.name ? p.name.split(' ').slice(1).join(' ') : '')),
-        })) as Profile[];
-      }
-    }
+      if (pError || !profiles) return [];
 
-    return studentIds.map((id) => ({
-      id,
-      email: id === DEMO_STUDENT_ID ? 'demo.ogrenci@mahfaza.co' : `student-${id.substring(0, 6)}@mahfaza.co`,
-      first_name: id === DEMO_STUDENT_ID ? 'Demo' : 'Öğrenci',
-      last_name: id === DEMO_STUDENT_ID ? 'Öğrenci' : id.substring(0, 4),
-      role: 'student' as const,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }));
+      return profiles.map((p: any) => ({
+        ...p,
+        first_name: p.first_name || (p.full_name ? p.full_name.split(' ')[0] : (p.name ? p.name.split(' ')[0] : 'Öğrenci')),
+        last_name: p.last_name || (p.full_name ? p.full_name.split(' ').slice(1).join(' ') : (p.name ? p.name.split(' ').slice(1).join(' ') : '')),
+      })) as Profile[];
+    } catch {
+      return [];
+    }
   },
 
   /**
-   * Check if a student is assigned to a coach (authoritative access check for Student 360)
+   * Get assigned coach for a student directly from Supabase coach_student_links table
+   */
+  async getStudentAssignedCoach(studentId: string): Promise<Profile | null> {
+    if (!isSupabaseConfigured) return null;
+
+    try {
+      const { data: link, error } = await supabase
+        .from('coach_student_links')
+        .select('coach_id')
+        .eq('student_id', studentId)
+        .eq('status', 'active')
+        .maybeSingle();
+
+      if (error || !link || !link.coach_id) return null;
+
+      const { data: coachProfile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', link.coach_id)
+        .maybeSingle();
+
+      if (!coachProfile) return null;
+
+      return {
+        ...coachProfile,
+        first_name: coachProfile.first_name || (coachProfile.full_name ? coachProfile.full_name.split(' ')[0] : 'Koç'),
+        last_name: coachProfile.last_name || (coachProfile.full_name ? coachProfile.full_name.split(' ').slice(1).join(' ') : ''),
+      } as Profile;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Check if a student is assigned to a coach (authoritative access check)
    */
   async isStudentAssignedToCoach(coachId: string, studentId: string): Promise<boolean> {
-    const students = await this.getCoachAssignedStudents(coachId);
-    return students.some((s) => s.id === studentId);
+    try {
+      const { data: link } = await supabase
+        .from('coach_student_links')
+        .select('id')
+        .eq('coach_id', coachId)
+        .eq('student_id', studentId)
+        .eq('status', 'active')
+        .maybeSingle();
+
+      return Boolean(link);
+    } catch {
+      return false;
+    }
   },
 
   /**
@@ -177,16 +133,23 @@ export const relationshipService = {
 
     const term = emailOrCode.trim().toLowerCase();
 
-    // 1. Fetch coach's capacity limit
+    // 1. Fetch coach's capacity limit from subscriptions table
     const currentStudents = await this.getCoachAssignedStudents(coachId);
-    const { data: subData } = await supabase
-      .from('user_subscriptions')
-      .select('plan_id, status, plan:subscription_plans(student_capacity)')
-      .eq('user_id', coachId)
-      .eq('status', 'active')
-      .maybeSingle();
+    let maxCapacity = 10;
+    try {
+      const { data: subData } = await supabase
+        .from('subscriptions')
+        .select('plan_id, status')
+        .eq('user_id', coachId)
+        .eq('status', 'active')
+        .maybeSingle();
 
-    const maxCapacity = (subData?.plan as any)?.student_capacity || 10;
+      if (subData?.plan_id === 'coach_pro') maxCapacity = 25;
+      else if (subData?.plan_id === 'coach_elite') maxCapacity = 100;
+    } catch {
+      // default capacity
+    }
+
     if (currentStudents.length >= maxCapacity) {
       throw new Error(
         `Koçluk lisans paketinizin öğrenci kapasitesi (${maxCapacity} öğrenci) dolmuştur. Yeni öğrenci eklemek için lütfen paketinizi yükseltin.`
@@ -211,28 +174,44 @@ export const relationshipService = {
       throw new Error('Belirtilen kullanıcı bir öğrenci hesabı değildir.');
     }
 
-    // 3. Prevent duplicate relationship
+    // 3. Prevent duplicate relationship with same coach
     if (currentStudents.some((s) => s.id === student.id)) {
       throw new Error('Bu öğrenci zaten koçluk portföyünüzde kayıtlıdır.');
     }
 
-    // 4. Try remote insert into coach_students
-    try {
-      await supabase.from('coach_students').insert({
-        coach_id: coachId,
-        student_id: student.id,
-      });
-    } catch {
-      // ignore if migration not executed
+    // 4. Guard: Check if student already has an active link with another coach (never overwrite silently!)
+    const { data: existingCoachLink } = await supabase
+      .from('coach_student_links')
+      .select('coach_id')
+      .eq('student_id', student.id)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    if (existingCoachLink && existingCoachLink.coach_id && existingCoachLink.coach_id !== coachId) {
+      throw new Error('Bu öğrenci zaten başka bir koç ile eşleşmiştir. Önce mevcut koçluk ilişkisinin sonlandırılması gerekir.');
     }
 
-    // 5. Persist pairing in stored pairings
-    const stored = getStoredPairings();
-    const existing = stored[coachId] || [];
-    if (!existing.includes(student.id)) {
-      existing.push(student.id);
-      stored[coachId] = existing;
-      saveStoredPairings(stored);
+    // 5. Insert relationship into coach_student_links table
+    const { error: insertErr } = await supabase
+      .from('coach_student_links')
+      .insert({
+        coach_id: coachId,
+        student_id: student.id,
+        status: 'active',
+      });
+
+    if (insertErr) {
+      throw new Error(insertErr.message);
+    }
+
+    // Also update coach_id on students table if record exists
+    try {
+      await supabase
+        .from('students')
+        .update({ coach_id: coachId })
+        .eq('user_id', student.id);
+    } catch {
+      // ignore
     }
 
     return {
@@ -243,23 +222,161 @@ export const relationshipService = {
   },
 
   /**
-   * Remove student from coach portfolio
+   * Remove student from coach portfolio directly in database
    */
   async unlinkCoachStudent(coachId: string, studentId: string): Promise<void> {
+    const { error } = await supabase
+      .from('coach_student_links')
+      .delete()
+      .eq('coach_id', coachId)
+      .eq('student_id', studentId);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    // Clear coach_id on students table
     try {
       await supabase
-        .from('coach_students')
-        .delete()
-        .eq('coach_id', coachId)
-        .eq('student_id', studentId);
+        .from('students')
+        .update({ coach_id: null })
+        .eq('user_id', studentId);
     } catch {
       // ignore
     }
+  },
 
-    const stored = getStoredPairings();
-    if (stored[coachId]) {
-      stored[coachId] = stored[coachId].filter((id) => id !== studentId);
-      saveStoredPairings(stored);
+  /**
+   * Get or generate unique coach invite code from coach_invitations table
+   */
+  async getCoachInviteCode(coachId: string): Promise<string> {
+    try {
+      const { data: existing } = await supabase
+        .from('coach_invitations')
+        .select('invite_code')
+        .eq('coach_id', coachId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existing?.invite_code) {
+        return existing.invite_code;
+      }
+
+      // Generate clean unique code: KOC-XXXXXX
+      const rawRand = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const newCode = `KOC-${rawRand}`;
+
+      const { data: inserted, error } = await supabase
+        .from('coach_invitations')
+        .insert({
+          coach_id: coachId,
+          invite_code: newCode,
+          is_active: true,
+        })
+        .select('invite_code')
+        .single();
+
+      if (!error && inserted?.invite_code) {
+        return inserted.invite_code;
+      }
+
+      return newCode;
+    } catch {
+      return `KOC-${coachId.substring(0, 6).toUpperCase()}`;
+    }
+  },
+
+  /**
+   * Validate coach invite code directly against coach_invitations table
+   */
+  async validateInviteCode(inviteCode: string): Promise<{
+    valid: boolean;
+    coachId?: string;
+    coachName?: string;
+    message?: string;
+  }> {
+    const trimmed = inviteCode.trim().toUpperCase();
+    if (!trimmed) {
+      return { valid: false, message: 'Lütfen bir davet kodu girin.' };
+    }
+
+    try {
+      const { data: inv, error } = await supabase
+        .from('coach_invitations')
+        .select('coach_id, is_active')
+        .eq('invite_code', trimmed)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (error || !inv || !inv.coach_id) {
+        return { valid: false, message: 'Geçersiz veya süresi dolmuş koç davet kodu.' };
+      }
+
+      const { data: coachProf } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, full_name')
+        .eq('id', inv.coach_id)
+        .maybeSingle();
+
+      const coachName = coachProf
+        ? `${coachProf.first_name || ''} ${coachProf.last_name || ''}`.trim() || coachProf.full_name || 'Koç'
+        : 'Koç';
+
+      return {
+        valid: true,
+        coachId: inv.coach_id,
+        coachName,
+      };
+    } catch {
+      return { valid: false, message: 'Davet kodu doğrulanamadı.' };
+    }
+  },
+
+  /**
+   * Pair a newly registered or existing student via invite code
+   */
+  async pairStudentWithInviteCode(studentId: string, inviteCode: string): Promise<void> {
+    const validation = await this.validateInviteCode(inviteCode);
+    if (!validation.valid || !validation.coachId) {
+      throw new Error(validation.message || 'Geçersiz davet kodu.');
+    }
+
+    // Check existing link (do NOT overwrite silently)
+    const { data: existingLink } = await supabase
+      .from('coach_student_links')
+      .select('coach_id')
+      .eq('student_id', studentId)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    if (existingLink && existingLink.coach_id && existingLink.coach_id !== validation.coachId) {
+      throw new Error('Bu öğrenci zaten başka bir koç ile eşleşmiştir. Mevcut koçluk ilişkisi değiştirilemez.');
+    }
+
+    if (!existingLink) {
+      const { error: insErr } = await supabase
+        .from('coach_student_links')
+        .insert({
+          coach_id: validation.coachId,
+          student_id: studentId,
+          status: 'active',
+        });
+
+      if (insErr) {
+        throw new Error(insErr.message);
+      }
+    }
+
+    // Update students table coach_id
+    try {
+      await supabase
+        .from('students')
+        .update({ coach_id: validation.coachId })
+        .eq('user_id', studentId);
+    } catch {
+      // ignore
     }
   },
 

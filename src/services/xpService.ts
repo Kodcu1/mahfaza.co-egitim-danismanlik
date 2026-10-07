@@ -5,22 +5,7 @@ import { StudentXPData, XPTransaction } from '../types';
 
 export const xpService = {
   async getStudentXP(studentId: string): Promise<StudentXPData | null> {
-    try {
-      // 1. First attempt to query students_xp_data table
-      const { data, error } = await supabase
-        .from('students_xp_data')
-        .select('student_id, lifetime_xp, wallet_xp, current_streak_days, last_activity_date, today_earned_xp, updated_at')
-        .eq('student_id', studentId)
-        .maybeSingle();
-
-      if (!error && data) {
-        return data as StudentXPData;
-      }
-    } catch {
-      // Fall through to real xp_transactions derivation
-    }
-
-    // 2. Query real xp_transactions to calculate exact authoritative values
+    // 1. Authoritative derivation from real xp_transactions table in Supabase
     try {
       const { data: txs, error: txErr } = await supabase
         .from('xp_transactions')
@@ -119,31 +104,14 @@ export const xpService = {
     daily_remaining_xp?: number;
     message?: string;
   }> {
-    // 1. Try award_student_xp RPC
-    try {
-      const { data, error } = await supabase.rpc('award_student_xp', {
-        p_student_id: payload.student_id,
-        p_base_amount: payload.base_amount,
-        p_action_type: payload.action_type,
-        p_description: payload.description,
-        p_reference_id: payload.reference_id || null,
-      });
-
-      if (!error && data) {
-        return data;
-      }
-    } catch {
-      // Fall through to adjust_manual_xp_atomic
-    }
-
-    // Idempotency guard: If reference_id is provided, check if already awarded
+    // 1. Authoritative Idempotency Guard: If reference_id is provided, check if already awarded
     if (payload.reference_id && payload.base_amount > 0) {
       try {
         const { data: existingTx } = await supabase
           .from('xp_transactions')
           .select('id')
           .eq('student_id', payload.student_id)
-          .ilike('reason', `%${payload.reference_id}%`)
+          .ilike('reason', `%[ref:${payload.reference_id}]%`)
           .maybeSingle();
 
         if (existingTx) {
@@ -158,7 +126,7 @@ export const xpService = {
       }
     }
 
-    // 2. Fallback to atomic adjust_manual_xp_atomic
+    // 2. Authoritative Atomic Database Procedure: adjust_manual_xp_atomic
     const finalReason = payload.reference_id 
       ? `${payload.description || 'Görev tamamlama ödülü'} [ref:${payload.reference_id}]`
       : (payload.description || 'Görev tamamlama ödülü');

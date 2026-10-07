@@ -543,8 +543,8 @@ export const subscriptionService = {
   async getUserSubscription(userId: string): Promise<UserSubscription> {
     try {
       const { data, error } = await supabase
-        .from('user_subscriptions')
-        .select('*, plan:subscription_plans(*)')
+        .from('subscriptions')
+        .select('*')
         .eq('user_id', userId)
         .maybeSingle();
 
@@ -564,12 +564,20 @@ export const subscriptionService = {
         };
       }
 
-      // If joined plan is missing or empty, resolve from fallback list
-      if (!data.plan) {
-        data.plan = ALL_COMMERCIAL_PLANS.find((p) => p.id === data.plan_id);
-      }
+      const plan = ALL_COMMERCIAL_PLANS.find((p) => p.id === data.plan_id) || ALL_COMMERCIAL_PLANS.find((p) => p.id === 'free')!;
 
-      return data as UserSubscription;
+      return {
+        id: data.id,
+        user_id: data.user_id,
+        plan_id: data.plan_id,
+        status: data.status || 'active',
+        current_period_start: data.created_at || new Date().toISOString(),
+        current_period_end: data.current_period_end || new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+        cancel_at_period_end: false,
+        created_at: data.created_at || new Date().toISOString(),
+        updated_at: data.updated_at || new Date().toISOString(),
+        plan,
+      } as UserSubscription;
     } catch {
       const freePlan = ALL_COMMERCIAL_PLANS.find((p) => p.id === 'free')!;
       return {
@@ -598,15 +606,43 @@ export const subscriptionService = {
   },
 
   /**
-   * Cancel subscription at period end
+   * Cancel subscription
    */
   async cancelSubscription(userId: string): Promise<void> {
     const { error } = await supabase
-      .from('user_subscriptions')
-      .update({ cancel_at_period_end: true, updated_at: new Date().toISOString() })
+      .from('subscriptions')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
       .eq('user_id', userId);
 
     if (error) throw new Error(error.message);
+  },
+
+  /**
+   * Request or change plan for user in Supabase database (source of truth)
+   * Writes directly to subscriptions table without any localStorage fallback
+   */
+  async requestPlanChange(
+    userId: string,
+    planId: SubscriptionPlanId
+  ): Promise<UserSubscription> {
+    const isFree = planId === 'free';
+    const status: SubscriptionStatus = isFree ? 'active' : 'trialing';
+
+    const { error } = await supabase
+      .from('subscriptions')
+      .upsert(
+        {
+          user_id: userId,
+          plan_id: planId,
+          status,
+          current_period_end: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id' }
+      );
+
+    if (error) throw new Error(error.message);
+    return await this.getUserSubscription(userId);
   },
 
   /**
@@ -618,15 +654,13 @@ export const subscriptionService = {
     status: SubscriptionStatus = 'active'
   ): Promise<void> {
     const { error } = await supabase
-      .from('user_subscriptions')
+      .from('subscriptions')
       .upsert(
         {
           user_id: userId,
           plan_id: planId,
           status,
-          current_period_start: new Date().toISOString(),
           current_period_end: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
-          cancel_at_period_end: false,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' }
@@ -835,14 +869,12 @@ export const subscriptionService = {
   async recordUserRegistrationPlan(userId: string, planId: SubscriptionPlanId): Promise<void> {
     try {
       const isFree = planId === 'free';
-      await supabase.from('user_subscriptions').upsert(
+      await supabase.from('subscriptions').upsert(
         {
           user_id: userId,
           plan_id: isFree ? 'free' : planId,
           status: isFree ? 'active' : 'trialing',
-          current_period_start: new Date().toISOString(),
           current_period_end: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
-          cancel_at_period_end: false,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' }

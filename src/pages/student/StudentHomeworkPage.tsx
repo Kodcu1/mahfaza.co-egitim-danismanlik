@@ -29,7 +29,7 @@ export const StudentHomeworkPage: React.FC = () => {
   const [homeworks, setHomeworks] = useState<Homework[]>([]);
   const [coachTasks, setCoachTasks] = useState<CoachTask[]>([]);
   const [submissions, setSubmissions] = useState<Record<string, HomeworkSubmission>>({});
-  const [activeTab, setActiveTab] = useState<TaskTab>('all');
+  const [activeTab, setActiveTab] = useState<TaskTab>('pending');
   const [loading, setLoading] = useState(true);
 
   // Submit Modal for Homework
@@ -246,20 +246,6 @@ export const StudentHomeworkPage: React.FC = () => {
       {/* Tabs Filter Bar */}
       <div className="flex flex-wrap items-center gap-2 p-1 bg-zinc-900/80 border border-zinc-800 rounded-lg">
         <button
-          onClick={() => setActiveTab('all')}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${
-            activeTab === 'all'
-              ? 'bg-zinc-800 text-amber-400 shadow-xs'
-              : 'text-zinc-400 hover:text-zinc-200'
-          }`}
-        >
-          <span>Tümü</span>
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700 text-zinc-300">
-            {counts.all}
-          </span>
-        </button>
-
-        <button
           onClick={() => setActiveTab('pending')}
           className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${
             activeTab === 'pending'
@@ -267,7 +253,7 @@ export const StudentHomeworkPage: React.FC = () => {
               : 'text-zinc-400 hover:text-zinc-200'
           }`}
         >
-          <span>Bekleyenler</span>
+          <span>Aktif Görevler</span>
           <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700 text-amber-300">
             {counts.pending}
           </span>
@@ -277,11 +263,11 @@ export const StudentHomeworkPage: React.FC = () => {
           onClick={() => setActiveTab('completed')}
           className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${
             activeTab === 'completed'
-              ? 'bg-zinc-800 text-amber-400 shadow-xs'
+              ? 'bg-zinc-800 text-emerald-400 shadow-xs'
               : 'text-zinc-400 hover:text-zinc-200'
           }`}
         >
-          <span>Tamamlananlar</span>
+          <span>Tamamlanan & Onaylananlar</span>
           <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700 text-emerald-300">
             {counts.completed}
           </span>
@@ -291,13 +277,27 @@ export const StudentHomeworkPage: React.FC = () => {
           onClick={() => setActiveTab('overdue')}
           className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${
             activeTab === 'overdue'
-              ? 'bg-zinc-800 text-amber-400 shadow-xs'
+              ? 'bg-zinc-800 text-rose-400 shadow-xs'
               : 'text-zinc-400 hover:text-zinc-200'
           }`}
         >
           <span>Gecikenler</span>
           <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700 text-rose-300">
             {counts.overdue}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('all')}
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+            activeTab === 'all'
+              ? 'bg-zinc-800 text-zinc-100 shadow-xs'
+              : 'text-zinc-400 hover:text-zinc-200'
+          }`}
+        >
+          <span>Tümü</span>
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700 text-zinc-300">
+            {counts.all}
           </span>
         </button>
       </div>

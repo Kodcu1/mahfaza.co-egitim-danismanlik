@@ -218,6 +218,52 @@ export const PricingPage: React.FC = () => {
         )}
       </div>
 
+      {/* Real Database Membership State Banner */}
+      {userSubscription && (
+        <div className="p-4 rounded-xl bg-zinc-900/90 border border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 font-bold">
+              <Zap className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-400">Veritabanındaki Mevcut Planınız:</span>
+                <span className="text-sm font-bold text-zinc-100">{userSubscription.plan?.name || 'Başlangıç (Ücretsiz)'}</span>
+                <Badge
+                  variant={
+                    userSubscription.status === 'active'
+                      ? 'success'
+                      : userSubscription.status === 'trialing'
+                      ? 'warning'
+                      : 'neutral'
+                  }
+                >
+                  {userSubscription.status === 'active'
+                    ? 'Aktif'
+                    : userSubscription.status === 'trialing'
+                    ? 'Aktivasyon / Ödeme Bekleniyor'
+                    : 'İptal Edildi'}
+                </Badge>
+              </div>
+              <p className="text-[11px] text-zinc-500 mt-0.5">
+                Kaynak: Supabase `subscriptions` tablosu (RLS yetkilendirmeli gerçek zamanlı durum).
+              </p>
+            </div>
+          </div>
+
+          {userSubscription.plan_id !== 'free' && userSubscription.status === 'active' && (
+            <Button
+              variant="secondary"
+              size="sm"
+              isLoading={cancelling}
+              onClick={handleCancelSubscription}
+            >
+              Aboneliği İptal Et
+            </Button>
+          )}
+        </div>
+      )}
+
       {feedbackMessage && (
         <div className="p-4 rounded-lg bg-zinc-900 border border-amber-500/30 text-amber-300 text-xs text-center max-w-md mx-auto">
           {feedbackMessage}
@@ -426,11 +472,27 @@ export const PricingPage: React.FC = () => {
                 variant="primary"
                 size="sm"
                 leftIcon={<CreditCard className="w-3.5 h-3.5" />}
-                onClick={() => {
-                  setFeedbackMessage(
-                    `'${selectedPlanForUpgrade.name}' paketine geçiş talebiniz kaydedildi. Canlı banka ödeme ağ geçidi yapılandırması bekleniyor.`
-                  );
-                  setSelectedPlanForUpgrade(null);
+                onClick={async () => {
+                  try {
+                    if (user?.id) {
+                      const updatedSub = await subscriptionService.requestPlanChange(
+                        user.id,
+                        selectedPlanForUpgrade.id
+                      );
+                      setUserSubscription(updatedSub);
+                      setFeedbackMessage(
+                        `'${selectedPlanForUpgrade.name}' paketine geçiş talebiniz veritabanına kaydedildi (${updatedSub.status === 'active' ? 'Aktif' : 'Aktivasyon / Ödeme Bekleniyor'}).`
+                      );
+                    } else {
+                      setFeedbackMessage(
+                        `'${selectedPlanForUpgrade.name}' paketine geçiş yapabilmek için lütfen önce giriş yapın.`
+                      );
+                    }
+                  } catch (err: any) {
+                    setFeedbackMessage(err.message || 'Plan değişikliği veritabanına kaydedilemedi.');
+                  } finally {
+                    setSelectedPlanForUpgrade(null);
+                  }
                 }}
               >
                 Plan Tercihini Kaydet

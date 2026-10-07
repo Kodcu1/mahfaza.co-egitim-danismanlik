@@ -22,6 +22,8 @@ import {
   Trash2,
   Coins,
   Plus,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -49,13 +51,32 @@ export const CoachStudentsPage: React.FC = () => {
   const [xpSubmitting, setXpSubmitting] = useState(false);
   const [xpError, setXpError] = useState<string | null>(null);
   const [xpSuccess, setXpSuccess] = useState<string | null>(null);
+  const [coachInviteCode, setCoachInviteCode] = useState<string>('');
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyInviteCode = async () => {
+    if (!coachInviteCode) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(coachInviteCode);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
+    } catch {
+      // safe fallback
+    }
+  };
 
   const loadData = useCallback(async () => {
     if (!user?.id) return;
     try {
       setLoading(true);
-      const studs = await relationshipService.getCoachAssignedStudents(user.id);
+      const [studs, myInviteCode] = await Promise.all([
+        relationshipService.getCoachAssignedStudents(user.id),
+        relationshipService.getCoachInviteCode(user.id),
+      ]);
       setStudents(studs);
+      setCoachInviteCode(myInviteCode);
 
       const xpMap: Record<string, StudentXPData | null> = {};
       const examsMap: Record<string, ExamResult[]> = {};
@@ -156,6 +177,33 @@ export const CoachStudentsPage: React.FC = () => {
           Öğrenci Ekle / Davet Et
         </Button>
       </div>
+
+      {/* Coach Unique Invite Code Banner Card */}
+      {coachInviteCode && (
+        <div className="bg-gradient-to-r from-purple-950/40 via-zinc-900/90 to-zinc-900 border border-purple-500/30 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <span className="text-[10px] font-mono text-purple-400 uppercase tracking-widest block font-bold">
+              Öğrenci Davet Kodunuz
+            </span>
+            <div className="text-xl font-mono font-extrabold text-zinc-100 tracking-wider mt-0.5 select-all">
+              {coachInviteCode}
+            </div>
+            <p className="text-xs text-zinc-400 mt-1">
+              Öğrencileriniz kayıt olurken bu kodu girerek doğrudan portföyünüze dahil olur.
+            </p>
+          </div>
+          <div className="shrink-0 flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleCopyInviteCode}
+              leftIcon={copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            >
+              {copied ? '✓ Kopyalandı' : 'Kodu Kopyala'}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Search Input */}
       {students.length > 0 && (
@@ -317,6 +365,23 @@ export const CoachStudentsPage: React.FC = () => {
               <div className="p-3 rounded-md bg-emerald-950/40 border border-emerald-900/60 text-emerald-300 text-xs flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
                 <span>{pairSuccess}</span>
+              </div>
+            )}
+
+            {/* Coach Unique Invite Code Banner */}
+            {coachInviteCode && (
+              <div className="p-3.5 rounded-lg bg-purple-950/30 border border-purple-500/30 space-y-1">
+                <span className="text-[10px] font-mono text-purple-400 uppercase tracking-wider block">
+                  Sizin Benzersiz Koç Davet Kodunuz
+                </span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-mono font-bold text-zinc-100 select-all tracking-wider">
+                    {coachInviteCode}
+                  </span>
+                  <span className="text-[10px] text-zinc-400">
+                    Öğrencileriniz kayıt olurken bu kodu girerek doğrudan sizinle eşleşebilir.
+                  </span>
+                </div>
               </div>
             )}
 

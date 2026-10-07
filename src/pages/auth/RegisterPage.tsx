@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../features/auth/AuthContext';
 import { subscriptionService, ALL_COMMERCIAL_PLANS } from '../../services/subscriptionService';
+import { relationshipService } from '../../services/relationshipService';
 import { SubscriptionPlan, SubscriptionPlanId } from '../../types';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -54,6 +55,9 @@ export const RegisterPage: React.FC = () => {
   // Institutional Invitation States (Teacher, Counselor, and Invited Coach)
   const [institutionName, setInstitutionName] = useState('');
   const [invitationCode, setInvitationCode] = useState('');
+
+  // Student optional coach invite code
+  const [studentCoachInviteCode, setStudentCoachInviteCode] = useState('');
 
   // Independent Coach States
   const [coachBio, setCoachBio] = useState('');
@@ -208,8 +212,26 @@ export const RegisterPage: React.FC = () => {
 
     try {
       if (selectedRole === 'student') {
+        if (studentCoachInviteCode.trim()) {
+          const validation = await relationshipService.validateInviteCode(studentCoachInviteCode);
+          if (!validation.valid) {
+            setErrorMessage(validation.message || 'Geçersiz veya süresi dolmuş koç davet kodu.');
+            setLoading(false);
+            return;
+          }
+        }
+
         const { error, user: newUser } = await signUp(email, password, firstName, lastName, 'student');
         if (error) throw error;
+
+        // Pair student with coach in real DB relationship if invite code provided
+        if (newUser?.id && studentCoachInviteCode.trim()) {
+          try {
+            await relationshipService.pairStudentWithInviteCode(newUser.id, studentCoachInviteCode);
+          } catch (pairErr) {
+            console.warn('Coach invite pairing note:', pairErr);
+          }
+        }
 
         // Persist requested package selection in commercial architecture
         if (newUser?.id) {
@@ -688,6 +710,22 @@ export const RegisterPage: React.FC = () => {
                         helperText="Okul veya kurs idarenizden edindiğiniz kod."
                       />
                     </div>
+                  </div>
+                )}
+
+                {/* Student Optional Coach Invite Code Block */}
+                {selectedRole === 'student' && (
+                  <div className="p-3.5 rounded-lg bg-zinc-950/80 border border-zinc-800 space-y-1.5">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-zinc-300">
+                      <KeyRound className="w-4 h-4 shrink-0 text-amber-400" />
+                      <span>Koç Davet Kodu (Opsiyonel)</span>
+                    </div>
+                    <Input
+                      value={studentCoachInviteCode}
+                      onChange={(e) => setStudentCoachInviteCode(e.target.value.toUpperCase())}
+                      placeholder="Örn: KOC-AB12CD"
+                      helperText="Özel bir koçunuz varsa, size ilettiği davet kodunu girerek doğrudan eşleşebilirsiniz."
+                    />
                   </div>
                 )}
 
