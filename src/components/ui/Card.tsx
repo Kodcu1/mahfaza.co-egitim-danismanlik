@@ -18,19 +18,19 @@ export const Card: React.FC<CardProps> = ({
 }) => {
   return (
     <div
-      className={`bg-zinc-900/70 border border-zinc-800/90 rounded-lg p-5 sm:p-6 transition-colors ${className}`}
+      className={`bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-sm hover:shadow-md transition-all ${className}`}
       {...props}
     >
       {(title || action) && (
-        <div className="flex items-start justify-between gap-4 mb-5 pb-4 border-b border-zinc-800/60">
+        <div className="flex items-start justify-between gap-4 mb-5 pb-4 border-b border-slate-100">
           <div>
             {title && (
-              <h3 className="text-base font-semibold text-zinc-100 tracking-tight">
+              <h3 className="text-base font-semibold text-slate-900 tracking-tight">
                 {title}
               </h3>
             )}
             {subtitle && (
-              <p className="text-xs text-zinc-400 mt-0.5">{subtitle}</p>
+              <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
             )}
           </div>
           {action && <div className="shrink-0">{action}</div>}

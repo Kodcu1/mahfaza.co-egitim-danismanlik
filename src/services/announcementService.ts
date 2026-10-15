@@ -63,7 +63,7 @@ export const announcementService = {
         is_published: payload.is_published ?? true,
         priority: payload.priority || 'normal',
       })
-      .select('*, author:profiles!announcements_author_id_fkey(first_name, last_name, role)')
+      .select('*, author:profiles!announcements_author_id_fkey(name, full_name, role)')
       .single();
 
     if (error) throw new Error(error.message);
@@ -84,7 +84,7 @@ export const announcementService = {
         updated_at: new Date().toISOString(),
       })
       .eq('id', id)
-      .select('*, author:profiles!announcements_author_id_fkey(first_name, last_name, role)')
+      .select('*, author:profiles!announcements_author_id_fkey(name, full_name, role)')
       .single();
 
     if (error) throw new Error(error.message);

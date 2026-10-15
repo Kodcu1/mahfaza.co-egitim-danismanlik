@@ -25,6 +25,7 @@ import {
   CreditCard,
   Sparkles,
 } from 'lucide-react';
+import { MahfazaLogo } from '../../utils/logoConstants';
 
 type RegistrationRole = 'student' | 'parent' | 'teacher' | 'coach' | 'counselor' | 'institution';
 type CoachEntryType = 'independent' | 'invited';
@@ -291,14 +292,12 @@ export const RegisterPage: React.FC = () => {
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
 
       {/* Brand Header */}
-      <div className="text-center mb-6 relative z-10">
+      <div className="text-center mb-6 relative z-10 flex flex-col items-center">
         <Link
           to="/auth/login"
-          className="inline-flex items-center justify-center w-11 h-11 rounded-lg bg-amber-500/10 border border-amber-500/30 mb-2.5 shadow-sm group"
+          className="inline-flex items-center justify-center mb-2.5 group"
         >
-          <span className="font-serif font-bold text-amber-400 text-lg tracking-widest group-hover:scale-105 transition-transform">
-            M
-          </span>
+          <MahfazaLogo size="lg" className="group-hover:scale-105 transition-transform" />
         </Link>
         <h1 className="font-serif text-xl sm:text-2xl font-bold tracking-wider text-zinc-100 uppercase">
           MAHFAZA<span className="text-amber-400 font-mono text-base">.CO</span>

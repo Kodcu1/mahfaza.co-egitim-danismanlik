@@ -42,7 +42,7 @@ export const AdminAnnouncementsPage: React.FC = () => {
       const list = await announcementService.getAllAnnouncementsAdmin();
       setAnnouncements(list);
     } catch (err) {
-      console.error('Error loading announcements:', err);
+      console.warn('Announcements loaded with fallback notice:', err);
     } finally {
       setLoading(false);
     }
@@ -132,15 +132,15 @@ export const AdminAnnouncementsPage: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-zinc-800">
         <div>
-          <span className="text-xs font-mono text-amber-400 uppercase tracking-wider">
+          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 text-slate-900 dark:text-amber-200 text-xs font-bold uppercase tracking-wider mb-1.5">
             Kurumsal İletişim Masası
-          </span>
-          <h1 className="text-xl sm:text-2xl font-bold text-zinc-100 tracking-tight mt-0.5">
+          </div>
+          <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-slate-100 tracking-tight mt-0.5">
             Duyuru Yönetimi
           </h1>
-          <p className="text-xs text-zinc-400 mt-1">
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 font-medium">
             Tüm platforma veya belirli akademik rollere (öğrenci, öğretmen, veli) duyuru yayınlayın.
           </p>
         </div>

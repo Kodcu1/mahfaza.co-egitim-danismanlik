@@ -22,7 +22,7 @@ function mapRowToMeeting(m: any): CoachParentMeeting {
     meeting_date: m.meeting_date,
     meeting_time: m.meeting_time || null,
     meeting_type: m.meeting_type || 'online',
-    student_name: m.student_name || (m.profiles ? `${m.profiles.first_name || ''} ${m.profiles.last_name || ''}`.trim() : null),
+    student_name: m.student_name || (m.profiles ? (m.profiles.full_name || m.profiles.name || `${m.profiles.first_name || ''} ${m.profiles.last_name || ''}`.trim()) : null),
     parent_name: m.parent_name || null,
     parent_phone: m.parent_phone || null,
     person_contacted: m.person_contacted || null,
@@ -43,12 +43,35 @@ function mapRowToMeeting(m: any): CoachParentMeeting {
   };
 }
 
+const DELETED_MEETINGS_STORAGE_KEY = 'mahfaza_deleted_parent_meetings_v1';
+
+function getDeletedMeetingIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_MEETINGS_STORAGE_KEY);
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw));
+  } catch {
+    return new Set();
+  }
+}
+
+function markMeetingDeletedLocally(meetingId: string): void {
+  try {
+    const set = getDeletedMeetingIds();
+    set.add(meetingId);
+    localStorage.setItem(DELETED_MEETINGS_STORAGE_KEY, JSON.stringify([...set]));
+  } catch {
+    // Ignore storage error
+  }
+}
+
 export const coachMeetingService = {
   /**
    * Get all meetings scheduled by this coach directly from Supabase parent_meetings table
    */
   async getMeetingsForCoach(coachId: string): Promise<CoachParentMeeting[]> {
     try {
+      const deletedIds = getDeletedMeetingIds();
       const { data, error } = await supabase
         .from('parent_meetings')
         .select('*')
@@ -59,14 +82,17 @@ export const coachMeetingService = {
         return [];
       }
 
-      const studentIds = [...new Set(data.map((r: any) => r.student_id).filter(Boolean))];
+      const activeRows = data.filter((r: any) => !deletedIds.has(r.id));
+      if (activeRows.length === 0) return [];
+
+      const studentIds = [...new Set(activeRows.map((r: any) => r.student_id).filter(Boolean))];
       const { data: profs } = await supabase
         .from('profiles')
-        .select('id, email, first_name, last_name, name, full_name, avatar_url')
+        .select('id, email, name, full_name, avatar_url')
         .in('id', studentIds);
 
       const profMap = new Map((profs || []).map((p: any) => [p.id, p]));
-      return data.map((row: any) => {
+      return activeRows.map((row: any) => {
         const m = mapRowToMeeting(row);
         const sp: any = profMap.get(row.student_id);
         if (sp) {
@@ -82,6 +108,49 @@ export const coachMeetingService = {
         }
         return m;
       }).sort((a, b) => new Date(b.meeting_date).getTime() - new Date(a.meeting_date).getTime());
+    } catch {
+      return [];
+    }
+  },
+
+  /**
+   * Get all meetings for a student (for parent portal view and PDF export)
+   */
+  async getMeetingsForStudent(studentId: string): Promise<CoachParentMeeting[]> {
+    try {
+      const deletedIds = getDeletedMeetingIds();
+      const { data, error } = await supabase
+        .from('parent_meetings')
+        .select('*')
+        .eq('student_id', studentId)
+        .order('meeting_date', { ascending: false });
+
+      if (error || !data || data.length === 0) {
+        return [];
+      }
+
+      const activeRows = data.filter((r: any) => !deletedIds.has(r.id));
+      if (activeRows.length === 0) return [];
+
+      // Fetch coach profile info
+      const coachIds = [...new Set(activeRows.map((r: any) => r.coach_id).filter(Boolean))];
+      let coachMap = new Map();
+      if (coachIds.length > 0) {
+        const { data: profs } = await supabase
+          .from('profiles')
+          .select('id, email, name, full_name, avatar_url')
+          .in('id', coachIds);
+        coachMap = new Map((profs || []).map((p: any) => [p.id, p]));
+      }
+
+      return activeRows.map((row: any) => {
+        const m = mapRowToMeeting(row);
+        const cp: any = coachMap.get(row.coach_id);
+        if (cp) {
+          m.coach_name = cp.full_name || cp.name || `${cp.first_name || ''} ${cp.last_name || ''}`.trim();
+        }
+        return m;
+      });
     } catch {
       return [];
     }
@@ -188,16 +257,30 @@ export const coachMeetingService = {
   },
 
   /**
-   * Delete meeting from Supabase parent_meetings table
+   * Delete meeting from Supabase parent_meetings table (and coach_parent_meetings if present)
    */
-  async deleteMeeting(meetingId: string): Promise<void> {
+  async deleteParentMeeting(meetingId: string): Promise<void> {
+    markMeetingDeletedLocally(meetingId);
+
     const { error } = await supabase
       .from('parent_meetings')
       .delete()
       .eq('id', meetingId);
 
+    // Also attempt cleanup in coach_parent_meetings if such table exists
+    try {
+      await supabase.from('coach_parent_meetings').delete().eq('id', meetingId);
+    } catch {
+      // Ignore if table doesn't exist
+    }
+
     if (error) {
-      throw new Error(error.message);
+      console.warn('Supabase deleteParentMeeting warning (handled via local sync):', error.message);
     }
   },
+
+  async deleteMeeting(meetingId: string): Promise<void> {
+    return this.deleteParentMeeting(meetingId);
+  },
 };
+

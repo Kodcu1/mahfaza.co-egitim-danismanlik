@@ -280,7 +280,7 @@ export const rewardService = {
 
     const [{ data: rewards }, { data: profiles }] = await Promise.all([
       supabase.from('rewards').select('*').in('id', rewardIds),
-      supabase.from('profiles').select('id, email, name, full_name, first_name, last_name, avatar_url').in('id', studentIds),
+      supabase.from('profiles').select('id, email, name, full_name, avatar_url').in('id', studentIds),
     ]);
 
     const rewardMap = new Map((rewards || []).map((rw: any) => [rw.id, mapRowToReward(rw)]));
@@ -327,7 +327,7 @@ export const rewardService = {
 
     const [{ data: rewards }, { data: profiles }] = await Promise.all([
       supabase.from('rewards').select('*').in('id', rewardIds),
-      supabase.from('profiles').select('id, email, name, full_name, first_name, last_name, avatar_url').in('id', studentIds),
+      supabase.from('profiles').select('id, email, name, full_name, avatar_url').in('id', studentIds),
     ]);
 
     const rewardMap = new Map((rewards || []).map((rw: any) => [rw.id, mapRowToReward(rw)]));
@@ -429,12 +429,22 @@ export const rewardService = {
       await notificationService.createNotification({
         user_id: req.student_id,
         title: '🎉 Ödül Talebiniz Onaylandı!',
-        message: `"${rewardTitle}" ödülünüz koçunuz tarafından onaylandı! (${costXP} XP düşüldü)`,
+        message: `"${rewardTitle}" ödülünüz koçunuz tarafından onaylandı! (-${costXP} XP düşüldü)`,
         type: 'reward',
         link: '/student/rewards',
       });
     } catch {
       // ignore
+    }
+
+    // 5. Dispatch instant UI events across application
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('mahfaza:xp-updated', {
+          detail: { studentId: req.student_id, amount: -costXP },
+        })
+      );
+      window.dispatchEvent(new CustomEvent('mahfaza:counts-updated'));
     }
 
     return { success: true, message: 'Ödül talebi başarıyla onaylandı ve XP bakiyesi güncellendi.' };
@@ -475,6 +485,36 @@ export const rewardService = {
       } catch {
         // ignore
       }
+    }
+  },
+
+  /**
+   * Helper alias for getRewards
+   */
+  async getActiveRewards(): Promise<Reward[]> {
+    return this.getRewards();
+  },
+
+  /**
+   * Helper alias for requestReward with optional note
+   */
+  async createRewardRequest(studentId: string, rewardId: string, notes?: string): Promise<RewardRequest> {
+    return this.requestReward(studentId, rewardId);
+  },
+
+  /**
+   * Process reward request (approve or reject)
+   */
+  async processRewardRequest(
+    requestId: string,
+    action: 'approved' | 'rejected',
+    coachId?: string,
+    coachNote?: string
+  ): Promise<void> {
+    if (action === 'approved') {
+      await this.approveRewardAtomic(requestId, coachNote);
+    } else {
+      await this.rejectRewardRequest(requestId, coachNote || 'Koç tarafından reddedildi.');
     }
   },
 };

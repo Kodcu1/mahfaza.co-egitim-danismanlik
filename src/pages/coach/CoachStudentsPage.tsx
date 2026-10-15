@@ -3,7 +3,8 @@ import { useAuth } from '../../features/auth/AuthContext';
 import { relationshipService } from '../../services/relationshipService';
 import { xpService } from '../../services/xpService';
 import { examService } from '../../services/examService';
-import { Profile, StudentXPData, ExamResult } from '../../types';
+import { subscriptionService } from '../../services/subscriptionService';
+import { Profile, StudentXPData, ExamResult, UserSubscription, SubscriptionPlanId } from '../../types';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -24,6 +25,8 @@ import {
   Plus,
   Copy,
   Check,
+  Crown,
+  Sparkles,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -32,6 +35,7 @@ export const CoachStudentsPage: React.FC = () => {
   const [students, setStudents] = useState<Profile[]>([]);
   const [studentXPMap, setStudentXPMap] = useState<Record<string, StudentXPData | null>>({});
   const [studentExamsMap, setStudentExamsMap] = useState<Record<string, ExamResult[]>>({});
+  const [studentSubMap, setStudentSubMap] = useState<Record<string, UserSubscription | null>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -41,6 +45,11 @@ export const CoachStudentsPage: React.FC = () => {
   const [pairingLoading, setPairingLoading] = useState(false);
   const [pairError, setPairError] = useState<string | null>(null);
   const [pairSuccess, setPairSuccess] = useState<string | null>(null);
+
+  // Unlink Confirmation Modal
+  const [unlinkModalOpen, setUnlinkModalOpen] = useState(false);
+  const [studentToUnlink, setStudentToUnlink] = useState<Profile | null>(null);
+  const [unlinkingLoading, setUnlinkingLoading] = useState(false);
 
   // Manual XP Modal
   const [xpModalOpen, setXpModalOpen] = useState(false);
@@ -53,6 +62,13 @@ export const CoachStudentsPage: React.FC = () => {
   const [xpSuccess, setXpSuccess] = useState<string | null>(null);
   const [coachInviteCode, setCoachInviteCode] = useState<string>('');
   const [copied, setCopied] = useState(false);
+
+  // Coach Student Package Upgrade Modal
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+  const [selectedStudentForUpgrade, setSelectedStudentForUpgrade] = useState<Profile | null>(null);
+  const [selectedTargetPlan, setSelectedTargetPlan] = useState<SubscriptionPlanId>('pro');
+  const [upgradingPackage, setUpgradingPackage] = useState(false);
+  const [upgradeFeedback, setUpgradeFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const handleCopyInviteCode = async () => {
     if (!coachInviteCode) return;
@@ -67,40 +83,90 @@ export const CoachStudentsPage: React.FC = () => {
     }
   };
 
+  const getUnlinkedIds = useCallback(() => {
+    if (!user?.id) return [];
+    try {
+      return JSON.parse(localStorage.getItem(`mahfaza_unlinked_${user.id}`) || '[]');
+    } catch {
+      return [];
+    }
+  }, [user?.id]);
+
   const loadData = useCallback(async () => {
     if (!user?.id) return;
+    const cacheKey = `mahfaza_coach_students_${user.id}`;
+    const unlinkedIds = getUnlinkedIds();
+
+    // 1. Instant Cache Hydration (prevents blank screen or lag)
     try {
-      setLoading(true);
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed: Profile[] = JSON.parse(cached);
+        const filteredCached = parsed.filter((s) => !unlinkedIds.includes(s.id));
+        if (filteredCached.length > 0) {
+          setStudents(filteredCached);
+          setLoading(false);
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
       const [studs, myInviteCode] = await Promise.all([
         relationshipService.getCoachAssignedStudents(user.id),
         relationshipService.getCoachInviteCode(user.id),
       ]);
-      setStudents(studs);
+
+      // Filter out permanently deleted students (ghost data elimination)
+      const validStudents = (studs || []).filter((s) => !unlinkedIds.includes(s.id));
+
+      setStudents(validStudents);
+      localStorage.setItem(cacheKey, JSON.stringify(validStudents));
       setCoachInviteCode(myInviteCode);
 
       const xpMap: Record<string, StudentXPData | null> = {};
       const examsMap: Record<string, ExamResult[]> = {};
+      const subMap: Record<string, UserSubscription | null> = {};
 
-      for (const s of studs) {
-        const [xp, exams] = await Promise.all([
+      for (const s of validStudents) {
+        const [xp, exams, sub] = await Promise.all([
           xpService.getStudentXP(s.id),
           examService.getStudentExamResults(s.id),
+          subscriptionService.getUserSubscription(s.id).catch(() => null),
         ]);
         xpMap[s.id] = xp;
         examsMap[s.id] = exams;
+        subMap[s.id] = sub;
       }
 
       setStudentXPMap(xpMap);
       setStudentExamsMap(examsMap);
+      setStudentSubMap(subMap);
     } catch (err) {
       console.error('Error loading coach students portfolio:', err);
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [user?.id, getUnlinkedIds]);
 
   useEffect(() => {
     loadData();
+    const handleSync = () => loadData();
+    const handleProfileUpdate = (e: any) => {
+      if (e?.detail?.userId && e?.detail?.avatarUrl) {
+        setStudents((prev) =>
+          prev.map((s) => (s.id === e.detail.userId ? { ...s, avatar_url: e.detail.avatarUrl } : s))
+        );
+      }
+    };
+
+    window.addEventListener('mahfaza:xp-updated', handleSync);
+    window.addEventListener('mahfaza:profile-updated', handleProfileUpdate);
+    return () => {
+      window.removeEventListener('mahfaza:xp-updated', handleSync);
+      window.removeEventListener('mahfaza:profile-updated', handleProfileUpdate);
+    };
   }, [loadData]);
 
   const handlePairStudent = async (e: React.FormEvent) => {
@@ -127,17 +193,90 @@ export const CoachStudentsPage: React.FC = () => {
     }
   };
 
-  const handleUnlink = async (studentId: string, studentName: string) => {
-    if (!user?.id) return;
-    if (!window.confirm(`'${studentName}' isimli öğrenciyi portföyünüzden çıkarmak istediğinize emin misiniz?`)) {
-      return;
-    }
+  // ACTION 4: PERMANENT DELETION & GHOST DATA ELIMINATION
+  const handleConfirmUnlink = async () => {
+    if (!user?.id || !studentToUnlink) return;
+    setUnlinkingLoading(true);
+    const studentIdToRemove = studentToUnlink.id;
 
     try {
-      await relationshipService.unlinkCoachStudent(user.id, studentId);
-      await loadData();
+      // 1. Immediately record in unlinked list in localStorage so they NEVER reappear
+      const unlinkedKey = `mahfaza_unlinked_${user.id}`;
+      const existingUnlinked: string[] = JSON.parse(localStorage.getItem(unlinkedKey) || '[]');
+      if (!existingUnlinked.includes(studentIdToRemove)) {
+        existingUnlinked.push(studentIdToRemove);
+        localStorage.setItem(unlinkedKey, JSON.stringify(existingUnlinked));
+      }
+
+      // 2. Immediately remove from React state & local coach students cache
+      setStudents((prev) => {
+        const filtered = prev.filter((s) => s.id !== studentIdToRemove);
+        localStorage.setItem(`mahfaza_coach_students_${user.id}`, JSON.stringify(filtered));
+        return filtered;
+      });
+
+      setUnlinkModalOpen(false);
+      setStudentToUnlink(null);
+
+      // 3. Perform backend unlink
+      await relationshipService.unlinkCoachStudent(user.id, studentIdToRemove);
     } catch (err) {
       console.error('Unlink error:', err);
+    } finally {
+      setUnlinkingLoading(false);
+    }
+  };
+
+  const handleOpenUpgradeModal = (student: Profile) => {
+    const currentSub = studentSubMap[student.id];
+    const currentPlanId = currentSub?.plan_id || student.package_tier || 'free';
+    setSelectedStudentForUpgrade(student);
+    setSelectedTargetPlan(currentPlanId === 'pro' ? 'premium' : 'pro');
+    setUpgradeFeedback(null);
+    setUpgradeModalOpen(true);
+  };
+
+  const handleConfirmUpgrade = async () => {
+    if (!user?.id || !selectedStudentForUpgrade) return;
+    setUpgradingPackage(true);
+    setUpgradeFeedback(null);
+    try {
+      const updatedSub = await subscriptionService.coachUpgradeStudentPackage(
+        selectedStudentForUpgrade.id,
+        selectedTargetPlan
+      );
+      setStudentSubMap((prev) => ({
+        ...prev,
+        [selectedStudentForUpgrade.id]: updatedSub,
+      }));
+      setStudents((prev) =>
+        prev.map((st) =>
+          st.id === selectedStudentForUpgrade.id
+            ? ({
+                ...st,
+                package: selectedTargetPlan,
+                subscription_plan: selectedTargetPlan,
+                package_tier: selectedTargetPlan,
+                subscription_tier: selectedTargetPlan,
+              } as Profile)
+            : st
+        )
+      );
+      setUpgradeFeedback({
+        type: 'success',
+        text: `${selectedStudentForUpgrade.first_name} ${selectedStudentForUpgrade.last_name} adlı öğrencinin paketi başarıyla '${updatedSub.plan?.name || selectedTargetPlan.toUpperCase()}' seviyesine yükseltildi!`,
+      });
+      setTimeout(() => {
+        setUpgradeModalOpen(false);
+        setUpgradeFeedback(null);
+      }, 1000);
+    } catch (err: any) {
+      setUpgradeFeedback({
+        type: 'error',
+        text: err.message || 'Paket yükseltme işlemi sırasında bir hata oluştu.',
+      });
+    } finally {
+      setUpgradingPackage(false);
     }
   };
 
@@ -154,25 +293,25 @@ export const CoachStudentsPage: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200/80">
         <div>
-          <span className="text-xs font-mono text-purple-400 uppercase tracking-wider flex items-center gap-1.5">
-            <Users className="w-3.5 h-3.5" />
+          <span className="text-xs font-semibold text-amber-600 uppercase tracking-wider flex items-center gap-1.5">
+            <Users className="w-4 h-4" />
             Öğrenci Portföy Yönetimi
           </span>
-          <h1 className="text-xl sm:text-2xl font-bold text-zinc-100 tracking-tight mt-0.5">
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight mt-1">
             Öğrenci Portföyüm
           </h1>
-          <p className="text-xs text-zinc-400 mt-1">
-            Yalnızca size atanmış danışanların akademik geçmişi, çalışma disiplini ve performans kayıtları.
+          <p className="text-xs text-slate-500 mt-1">
+            Yalnızca size atanmış danışanların akademik geçmişi, paket seviyeleri ve performans kayıtları.
           </p>
         </div>
 
         <Button
           variant="primary"
-          size="sm"
+          size="md"
           onClick={() => setPairModalOpen(true)}
-          leftIcon={<UserPlus className="w-3.5 h-3.5" />}
+          leftIcon={<UserPlus className="w-4 h-4" />}
         >
           Öğrenci Ekle / Davet Et
         </Button>
@@ -180,24 +319,24 @@ export const CoachStudentsPage: React.FC = () => {
 
       {/* Coach Unique Invite Code Banner Card */}
       {coachInviteCode && (
-        <div className="bg-gradient-to-r from-purple-950/40 via-zinc-900/90 to-zinc-900 border border-purple-500/30 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="bg-gradient-to-r from-amber-50 via-white to-amber-50/50 border border-amber-200/80 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
           <div>
-            <span className="text-[10px] font-mono text-purple-400 uppercase tracking-widest block font-bold">
+            <span className="text-[10px] font-mono text-amber-700 uppercase tracking-widest block font-bold">
               Öğrenci Davet Kodunuz
             </span>
-            <div className="text-xl font-mono font-extrabold text-zinc-100 tracking-wider mt-0.5 select-all">
+            <div className="text-2xl font-mono font-black text-slate-900 tracking-wider mt-1 select-all">
               {coachInviteCode}
             </div>
-            <p className="text-xs text-zinc-400 mt-1">
+            <p className="text-xs text-slate-600 mt-1">
               Öğrencileriniz kayıt olurken bu kodu girerek doğrudan portföyünüze dahil olur.
             </p>
           </div>
           <div className="shrink-0 flex items-center gap-2">
             <Button
-              variant="secondary"
-              size="sm"
+              variant="outline"
+              size="md"
               onClick={handleCopyInviteCode}
-              leftIcon={copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+              leftIcon={copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
             >
               {copied ? '✓ Kopyalandı' : 'Kodu Kopyala'}
             </Button>
@@ -212,19 +351,19 @@ export const CoachStudentsPage: React.FC = () => {
             placeholder="Öğrenci adı veya e-posta ile ara..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            leftIcon={<Search className="w-4 h-4 text-zinc-400" />}
+            leftIcon={<Search className="w-4 h-4 text-slate-400" />}
           />
         </div>
       )}
 
       {/* Student List */}
       {students.length === 0 ? (
-        <Card className="p-8 sm:p-12 text-center border-dashed border-zinc-800 bg-zinc-950/40">
-          <div className="w-14 h-14 rounded-full bg-purple-500/10 border border-purple-500/30 text-purple-400 flex items-center justify-center mx-auto mb-4">
+        <Card className="p-8 sm:p-12 text-center border-dashed border-slate-200 bg-white">
+          <div className="w-14 h-14 rounded-full bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center mx-auto mb-4">
             <Users className="w-7 h-7" />
           </div>
-          <h2 className="text-lg font-bold text-zinc-100">Öğrenci Ekleyin</h2>
-          <p className="text-xs text-zinc-400 mt-1 max-w-md mx-auto leading-relaxed">
+          <h2 className="text-lg font-bold text-slate-900">Öğrenci Ekleyin</h2>
+          <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto leading-relaxed">
             Öğrencinizi e-posta adresi veya davet kodu ile portföyünüze ekleyin.
           </p>
           <div className="mt-6 flex justify-center">
@@ -249,24 +388,46 @@ export const CoachStudentsPage: React.FC = () => {
             const xp = studentXPMap[student.id];
             const exams = studentExamsMap[student.id] || [];
             const latestExam = exams[0];
+            const sub = studentSubMap[student.id];
+            const activePlanId = sub?.plan_id || student.package_tier || 'free';
+            const activePlanName =
+              sub?.plan?.name ||
+              (activePlanId === 'premium'
+                ? 'Premium VIP'
+                : activePlanId === 'pro'
+                ? 'Pro Akademi'
+                : activePlanId === 'standard'
+                ? 'Standart Akademik'
+                : 'Başlangıç (Ücretsiz)');
 
             return (
               <div
                 key={student.id}
-                className="bg-zinc-900/70 border border-zinc-800 hover:border-purple-500/40 rounded-xl p-4 transition-all flex flex-col justify-between"
+                className="bg-white border border-slate-200/80 hover:border-amber-400 rounded-2xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
               >
                 <div>
                   {/* Student Header */}
                   <div className="flex items-start justify-between gap-3 mb-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-10 h-10 rounded-full bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 font-bold text-sm shrink-0">
-                        {student.first_name?.[0] || 'Ö'}
-                      </div>
+                    <div className="flex items-center gap-3 min-w-0">
+                      {student.avatar_url ? (
+                        <img
+                          src={student.avatar_url}
+                          alt={student.first_name || 'Öğrenci'}
+                          className="w-11 h-11 rounded-full object-cover border border-amber-300 shadow-xs shrink-0"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      ) : (
+                        <div className="w-11 h-11 rounded-full bg-amber-100 border border-amber-200 flex items-center justify-center text-amber-800 font-bold text-base shrink-0 shadow-xs">
+                          {student.first_name?.[0] || 'Ö'}
+                        </div>
+                      )}
                       <div className="min-w-0">
-                        <h3 className="font-bold text-sm text-zinc-100 truncate">
+                        <h3 className="font-bold text-sm text-slate-900 truncate">
                           {student.first_name} {student.last_name}
                         </h3>
-                        <p className="text-[11px] text-zinc-500 font-mono truncate">
+                        <p className="text-[11px] text-slate-400 font-mono truncate">
                           {student.email}
                         </p>
                       </div>
@@ -274,32 +435,52 @@ export const CoachStudentsPage: React.FC = () => {
 
                     <button
                       type="button"
-                      onClick={() => handleUnlink(student.id, `${student.first_name} ${student.last_name}`)}
-                      title="Portföyden Çıkar"
-                      className="text-zinc-600 hover:text-rose-400 transition-colors p-1"
+                      onClick={() => {
+                        setStudentToUnlink(student);
+                        setUnlinkModalOpen(true);
+                      }}
+                      title="Öğrenciyi Portföyden Çıkar / İlişkiyi Sonlandır"
+                      className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 cursor-pointer rounded-lg hover:bg-rose-50"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Active Package Tier Row + Quick Upgrade */}
+                  <div className="mb-3 p-2.5 rounded-xl bg-amber-50/70 border border-amber-200/80 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Crown className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span className="text-[11px] font-bold text-amber-900 truncate">
+                        Paket: {activePlanName}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenUpgradeModal(student)}
+                      className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white transition-colors shrink-0 cursor-pointer shadow-2xs"
+                    >
+                      Paketi Yükselt
                     </button>
                   </div>
 
                   {/* Academic Indicators */}
-                  <div className="grid grid-cols-3 gap-2 p-2.5 rounded-lg bg-zinc-950/80 border border-zinc-850 mb-3 text-center">
+                  <div className="grid grid-cols-3 gap-2 p-3 rounded-xl bg-slate-50 border border-slate-200/70 mb-4 text-center">
                     <div>
-                      <span className="text-[10px] text-zinc-500 font-mono block uppercase">Streak</span>
-                      <span className="text-xs font-bold font-mono text-amber-400 flex items-center justify-center gap-0.5 mt-0.5">
-                        <Flame className="w-3 h-3" />
+                      <span className="text-[10px] text-slate-400 font-semibold block uppercase">Streak</span>
+                      <span className="text-xs font-bold text-amber-700 flex items-center justify-center gap-1 mt-0.5">
+                        <Flame className="w-3.5 h-3.5 text-amber-500 fill-amber-500/20" />
                         {xp?.current_streak_days || 0} g
                       </span>
                     </div>
                     <div>
-                      <span className="text-[10px] text-zinc-500 font-mono block uppercase">Toplam XP</span>
-                      <span className="text-xs font-bold font-mono text-zinc-200 mt-0.5 block">
+                      <span className="text-[10px] text-slate-400 font-semibold block uppercase">Toplam XP</span>
+                      <span className="text-xs font-bold text-slate-900 mt-0.5 block">
                         {xp?.lifetime_xp?.toLocaleString('tr-TR') || 0}
                       </span>
                     </div>
                     <div>
-                      <span className="text-[10px] text-zinc-500 font-mono block uppercase">Son Deneme</span>
-                      <span className="text-xs font-bold font-mono text-emerald-400 mt-0.5 block">
+                      <span className="text-[10px] text-slate-400 font-semibold block uppercase">Son Deneme</span>
+                      <span className="text-xs font-bold text-emerald-700 mt-0.5 block">
                         {latestExam?.total_net ? `${latestExam.total_net} N` : '—'}
                       </span>
                     </div>
@@ -312,7 +493,7 @@ export const CoachStudentsPage: React.FC = () => {
                     variant="secondary"
                     size="sm"
                     className="w-full justify-center text-xs"
-                    leftIcon={<Coins className="w-3 h-3 text-amber-400" />}
+                    leftIcon={<Coins className="w-3 h-3 text-amber-600" />}
                     onClick={() => {
                       setSelectedStudentForXP(student);
                       setXpError(null);
@@ -350,35 +531,35 @@ export const CoachStudentsPage: React.FC = () => {
           maxWidth="md"
         >
           <form onSubmit={handlePairStudent} className="space-y-4">
-            <p className="text-xs text-zinc-400 leading-relaxed">
+            <p className="text-xs text-gray-600 leading-relaxed">
               Öğrencinizi sistemde kayıtlı e-posta adresini veya davet kodunu girerek koçluk portföyünüze dahil edin.
             </p>
 
             {pairError && (
-              <div className="p-3 rounded-md bg-rose-950/40 border border-rose-900/60 text-rose-300 text-xs flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
                 <span>{pairError}</span>
               </div>
             )}
 
             {pairSuccess && (
-              <div className="p-3 rounded-md bg-emerald-950/40 border border-emerald-900/60 text-emerald-300 text-xs flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
                 <span>{pairSuccess}</span>
               </div>
             )}
 
             {/* Coach Unique Invite Code Banner */}
             {coachInviteCode && (
-              <div className="p-3.5 rounded-lg bg-purple-950/30 border border-purple-500/30 space-y-1">
-                <span className="text-[10px] font-mono text-purple-400 uppercase tracking-wider block">
+              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 space-y-1">
+                <span className="text-[10px] font-mono text-amber-800 font-semibold uppercase tracking-wider block">
                   Sizin Benzersiz Koç Davet Kodunuz
                 </span>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-mono font-bold text-zinc-100 select-all tracking-wider">
+                  <span className="text-sm font-mono font-bold text-gray-800 select-all tracking-wider">
                     {coachInviteCode}
                   </span>
-                  <span className="text-[10px] text-zinc-400">
+                  <span className="text-[10px] text-gray-600">
                     Öğrencileriniz kayıt olurken bu kodu girerek doğrudan sizinle eşleşebilir.
                   </span>
                 </div>
@@ -393,7 +574,7 @@ export const CoachStudentsPage: React.FC = () => {
               onChange={(e) => setStudentInput(e.target.value)}
             />
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
+            <div className="flex justify-end gap-2 pt-3 border-t border-gray-200">
               <Button
                 variant="ghost"
                 size="sm"
@@ -448,13 +629,17 @@ export const CoachStudentsPage: React.FC = () => {
                   amount: finalAmount,
                   reason: xpReason.trim(),
                 });
+                const updatedXP = await xpService.getStudentXP(selectedStudentForXP.id);
+                setStudentXPMap((prev) => ({
+                  ...prev,
+                  [selectedStudentForXP.id]: updatedXP,
+                }));
                 setXpSuccess(`Başarılı! ${finalAmount > 0 ? '+' : ''}${finalAmount} XP bakiyeye yansıtıldı.`);
-                await loadData();
                 setTimeout(() => {
                   setXpModalOpen(false);
                   setXpSuccess(null);
                   setXpReason('');
-                }, 1500);
+                }, 1000);
               } catch (err: any) {
                 setXpError(err.message || 'XP işlemi gerçekleştirilemedi.');
               } finally {
@@ -463,16 +648,16 @@ export const CoachStudentsPage: React.FC = () => {
             }}
             className="space-y-4"
           >
-            <div className="p-3 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-between text-xs">
+            <div className="p-3 rounded-xl bg-slate-50 border border-gray-200 flex items-center justify-between text-xs">
               <div>
-                <span className="text-zinc-400 block">Öğrenci:</span>
-                <span className="text-zinc-100 font-semibold">
+                <span className="text-gray-600 block">Öğrenci:</span>
+                <span className="text-gray-800 font-bold">
                   {selectedStudentForXP.first_name} {selectedStudentForXP.last_name}
                 </span>
               </div>
               <div className="text-right">
-                <span className="text-zinc-400 block">Mevcut Cüzdan:</span>
-                <span className="text-amber-400 font-mono font-bold text-sm">
+                <span className="text-gray-600 block">Mevcut Cüzdan:</span>
+                <span className="text-amber-700 font-mono font-bold text-sm">
                   {studentXPMap[selectedStudentForXP.id]?.wallet_xp || 0} XP
                 </span>
               </div>
@@ -480,30 +665,30 @@ export const CoachStudentsPage: React.FC = () => {
 
             {/* Operation Direction */}
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-zinc-300 block">İşlem Türü</label>
+              <label className="text-xs font-semibold text-gray-800 block">İşlem Türü</label>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => setXpMode('add')}
-                  className={`p-2.5 rounded-lg text-xs font-semibold border flex items-center justify-center gap-2 cursor-pointer transition-colors ${
+                  className={`p-2.5 rounded-xl text-xs font-semibold border flex items-center justify-center gap-2 cursor-pointer transition-colors ${
                     xpMode === 'add'
-                      ? 'bg-emerald-500/10 border-emerald-500 text-emerald-300'
-                      : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                      ? 'bg-emerald-50 border-emerald-500 text-emerald-800'
+                      : 'bg-white border-gray-200 text-gray-600 hover:text-gray-800'
                   }`}
                 >
-                  <Plus className="w-4 h-4 text-emerald-400" />
+                  <Plus className="w-4 h-4 text-emerald-600" />
                   XP Ekle (+)
                 </button>
                 <button
                   type="button"
                   onClick={() => setXpMode('deduct')}
-                  className={`p-2.5 rounded-lg text-xs font-semibold border flex items-center justify-center gap-2 cursor-pointer transition-colors ${
+                  className={`p-2.5 rounded-xl text-xs font-semibold border flex items-center justify-center gap-2 cursor-pointer transition-colors ${
                     xpMode === 'deduct'
-                      ? 'bg-rose-500/10 border-rose-500 text-rose-300'
-                      : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                      ? 'bg-rose-50 border-rose-500 text-rose-800'
+                      : 'bg-white border-gray-200 text-gray-600 hover:text-gray-800'
                   }`}
                 >
-                  <span className="text-lg leading-none font-bold text-rose-400">-</span>
+                  <span className="text-lg leading-none font-bold text-rose-600">-</span>
                   XP Düşür (-)
                 </button>
               </div>
@@ -511,7 +696,7 @@ export const CoachStudentsPage: React.FC = () => {
 
             {/* Amount */}
             <div>
-              <label className="text-xs font-medium text-zinc-300 block mb-1">XP Miktarı</label>
+              <label className="text-xs font-semibold text-gray-800 block mb-1">XP Miktarı</label>
               <Input
                 type="number"
                 min="1"
@@ -524,22 +709,22 @@ export const CoachStudentsPage: React.FC = () => {
 
             {/* Mandatory Reason */}
             <div>
-              <label className="text-xs font-medium text-zinc-300 block mb-1">
+              <label className="text-xs font-semibold text-gray-800 block mb-1">
                 İşlem Gerekçesi (Zorunlu)
               </label>
               <textarea
                 value={xpReason}
                 onChange={(e) => setXpReason(e.target.value)}
                 placeholder="Örn: Haftalık çalışma hedefi başarısı tebriği, ödev telafisi vb."
-                className="w-full h-20 p-2.5 text-xs rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-amber-500"
+                className="w-full h-20 p-2.5 text-xs rounded-xl bg-white border border-gray-200 text-gray-800 placeholder-gray-400 focus:outline-none focus:border-amber-500"
                 required
               />
             </div>
 
             {/* Preview Balance */}
-            <div className="p-2.5 rounded bg-zinc-950 border border-zinc-850 flex items-center justify-between text-xs font-mono">
-              <span className="text-zinc-400">İşlem Sonrası Cüzdan:</span>
-              <span className="text-zinc-100 font-bold">
+            <div className="p-2.5 rounded-xl bg-slate-50 border border-gray-200 flex items-center justify-between text-xs font-mono">
+              <span className="text-gray-600">İşlem Sonrası Cüzdan:</span>
+              <span className="text-gray-800 font-bold">
                 {Math.max(
                   0,
                   (studentXPMap[selectedStudentForXP.id]?.wallet_xp || 0) +
@@ -550,13 +735,13 @@ export const CoachStudentsPage: React.FC = () => {
             </div>
 
             {xpError && (
-              <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs">
+              <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs">
                 {xpError}
               </div>
             )}
 
             {xpSuccess && (
-              <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs">
+              <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs">
                 {xpSuccess}
               </div>
             )}
@@ -580,6 +765,197 @@ export const CoachStudentsPage: React.FC = () => {
               </Button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* Modern Confirmation Dialog for Unlinking */}
+      <Modal
+        isOpen={unlinkModalOpen}
+        onClose={() => {
+          if (!unlinkingLoading) {
+            setUnlinkModalOpen(false);
+            setStudentToUnlink(null);
+          }
+        }}
+        title="Öğrenciyi Portföyden Çıkar / İlişkiyi Sonlandır"
+      >
+        <div className="space-y-4">
+          <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+            <div className="text-xs text-rose-900 leading-relaxed">
+              <span className="font-bold text-rose-950">
+                {studentToUnlink?.first_name} {studentToUnlink?.last_name}
+              </span>{' '}
+              ({studentToUnlink?.email}) isimli öğrenciyi danışan portföyünüzden çıkarmak üzeresiniz.
+            </div>
+          </div>
+
+          <div className="text-xs text-slate-600 space-y-2 leading-relaxed bg-slate-50 p-4 rounded-2xl border border-slate-200">
+            <p className="flex items-center gap-2 text-slate-800 font-medium">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              Öğrencinin platformdaki ana hesabı, çözdüğü denemeler ve XP geçmişi silinmez.
+            </p>
+            <p className="flex items-center gap-2 text-slate-800 font-medium">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              Yalnızca bu koçluk ilişkisi güvenli biçimde sonlandırılır.
+            </p>
+            <p className="flex items-center gap-2 text-slate-800 font-medium">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              Öğrenci dilediğinde koç davet kodunuzla veya yeni bir koçla tekrar eşleşebilir.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+            <Button
+              variant="outline"
+              size="md"
+              disabled={unlinkingLoading}
+              onClick={() => {
+                setUnlinkModalOpen(false);
+                setStudentToUnlink(null);
+              }}
+            >
+              Vazgeç
+            </Button>
+            <Button
+              variant="danger"
+              size="md"
+              isLoading={unlinkingLoading}
+              onClick={handleConfirmUnlink}
+              leftIcon={<Trash2 className="w-4 h-4" />}
+            >
+              Öğrenciyi Portföyden Çıkar
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* COACH STUDENT PACKAGE UPGRADE MODAL */}
+      {upgradeModalOpen && selectedStudentForUpgrade && (
+        <Modal
+          isOpen={upgradeModalOpen}
+          onClose={() => {
+            if (!upgradingPackage) {
+              setUpgradeModalOpen(false);
+              setSelectedStudentForUpgrade(null);
+            }
+          }}
+          title="Öğrenci Paketini Yükselt (Koç Yetkisi)"
+          subtitle="Danışanınızın paket seviyesini tek tıkla Pro Akademi veya Premium VIP seviyesine yükseltin"
+          maxWidth="md"
+        >
+          <div className="space-y-4 text-xs">
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+              <div>
+                <span className="text-slate-500 block">Danışan Öğrenci:</span>
+                <span className="font-bold text-slate-900 text-sm">
+                  {selectedStudentForUpgrade.first_name} {selectedStudentForUpgrade.last_name}
+                </span>
+                <span className="text-[11px] font-mono text-slate-500 block">
+                  {selectedStudentForUpgrade.email}
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-slate-500 block">Mevcut Paket:</span>
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 font-bold text-xs mt-0.5">
+                  <Crown className="w-3.5 h-3.5 text-amber-600" />
+                  {studentSubMap[selectedStudentForUpgrade.id]?.plan?.name || 'Başlangıç (Ücretsiz)'}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block font-bold text-slate-800">
+                Hedef Akademik Paket Seçin
+              </label>
+              <div className="grid grid-cols-1 gap-2.5">
+                {[
+                  {
+                    id: 'standard' as SubscriptionPlanId,
+                    name: 'Standart Akademik',
+                    price: '18.900 ₺ / yıl',
+                    desc: 'Deneme net analizi, standart ders içerikleri ve ödev takibi.',
+                  },
+                  {
+                    id: 'pro' as SubscriptionPlanId,
+                    name: 'Pro Akademi (Önerilen)',
+                    price: '34.900 ₺ / yıl',
+                    desc: 'Gelişmiş deneme karnesi, AI koçluk analizleri, XP ödül mağazası ve 360° rapor.',
+                  },
+                  {
+                    id: 'premium' as SubscriptionPlanId,
+                    name: 'Premium VIP',
+                    price: '54.900 ₺ / yıl',
+                    desc: 'Tam kapsamlı VIP koçluk, sınırsız içerik, öncelikli ödül vitrini ve yönetici raporu.',
+                  },
+                ].map((tier) => {
+                  const isSelected = selectedTargetPlan === tier.id;
+                  return (
+                    <button
+                      key={tier.id}
+                      type="button"
+                      onClick={() => setSelectedTargetPlan(tier.id)}
+                      className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                        isSelected
+                          ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-500/20'
+                          : 'bg-white border-slate-200 hover:border-amber-300'
+                      }`}
+                    >
+                      <div>
+                        <div className="font-bold text-slate-900 text-sm flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                          {tier.name}
+                        </div>
+                        <p className="text-[11px] text-slate-600 mt-0.5">{tier.desc}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="font-mono font-bold text-amber-700 text-xs block">
+                          {tier.price}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {upgradeFeedback && (
+              <div
+                className={`p-3 rounded-xl border text-xs font-medium flex items-center gap-2 ${
+                  upgradeFeedback.type === 'success'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : 'bg-rose-50 border-rose-200 text-rose-800'
+                }`}
+              >
+                {upgradeFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                )}
+                <span>{upgradeFeedback.text}</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setUpgradeModalOpen(false)}
+                disabled={upgradingPackage}
+              >
+                Vazgeç
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                isLoading={upgradingPackage}
+                onClick={handleConfirmUpgrade}
+                leftIcon={<Crown className="w-3.5 h-3.5" />}
+              >
+                Paketi Şimdi Yükselt
+              </Button>
+            </div>
+          </div>
         </Modal>
       )}
     </div>

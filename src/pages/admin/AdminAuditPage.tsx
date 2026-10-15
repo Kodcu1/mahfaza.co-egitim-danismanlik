@@ -15,22 +15,31 @@ export const AdminAuditPage: React.FC = () => {
       .from('audit_logs')
       .select(`
         id, actor_id, action, entity_type, entity_id, metadata, created_at,
-        profiles:actor_id(first_name, last_name, email)
+        profiles:actor_id(full_name, name, email)
       `)
       .order('created_at', { ascending: false })
       .limit(100)
       .then(({ data, error }) => {
         if (!error && data) {
-          setLogs(data.map((r: any) => ({
-            id: r.id,
-            actor_id: r.actor_id,
-            action: r.action,
-            entity_type: r.entity_type,
-            entity_id: r.entity_id,
-            metadata: r.metadata,
-            created_at: r.created_at,
-            actor: r.profiles,
-          })));
+          setLogs(data.map((r: any) => {
+            const ap = r.profiles;
+            return {
+              id: r.id,
+              actor_id: r.actor_id,
+              action: r.action,
+              entity_type: r.entity_type,
+              entity_id: r.entity_id,
+              metadata: r.metadata,
+              created_at: r.created_at,
+              actor: ap
+                ? {
+                    ...ap,
+                    first_name: ap.full_name ? ap.full_name.split(' ')[0] : (ap.name ? ap.name.split(' ')[0] : 'Sistem'),
+                    last_name: ap.full_name ? ap.full_name.split(' ').slice(1).join(' ') : (ap.name ? ap.name.split(' ').slice(1).join(' ') : ''),
+                  }
+                : undefined,
+            };
+          }));
         }
         setLoading(false);
       });
@@ -42,12 +51,14 @@ export const AdminAuditPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="pb-4 border-b border-zinc-800">
-        <span className="text-xs font-mono text-amber-400 uppercase tracking-wider">İzlenebilirlik & Güvenlik</span>
-        <h1 className="text-xl sm:text-2xl font-bold text-zinc-100 tracking-tight mt-0.5">
+      <div className="pb-4 border-b border-slate-200 dark:border-zinc-800">
+        <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 text-slate-900 dark:text-amber-200 text-xs font-bold uppercase tracking-wider mb-1.5">
+          İzlenebilirlik & Güvenlik
+        </div>
+        <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-slate-100 tracking-tight mt-0.5">
           Sistem Denetim Logları (Audit Log)
         </h1>
-        <p className="text-xs text-zinc-400 mt-1">
+        <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 font-medium">
           Kritik idari işlemler, oturum hareketleri ve yetki değişiklikleri değişmez log kaydında saklanır.
         </p>
       </div>

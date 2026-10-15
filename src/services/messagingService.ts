@@ -207,6 +207,10 @@ export const messagingService = {
         .eq('receiver_id', userId)
         .eq('sender_id', conversationId)
         .eq('is_read', false);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('mahfaza:counts-updated'));
+      }
     } catch {
       // ignore
     }

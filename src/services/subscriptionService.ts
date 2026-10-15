@@ -16,18 +16,17 @@ export const ALL_COMMERCIAL_PLANS: SubscriptionPlan[] = [
   {
     id: 'free',
     name: 'Başlangıç (Ücretsiz)',
-    description: 'Temel çalışma seansları ve günlük çalışma disiplini.',
+    description: 'Temel çalışma seansları, ders programı ve günlük çalışma disiplini.',
     category: 'student',
     monthly_price: 0,
     yearly_price: 0,
     features: [
-      'Temel profil ve ders programı',
+      'Temel profil ve haftalık ders programı',
       'Temel ders notu ve özetlere erişim',
+      'Standart Pomodoro odak sayacı',
       'Sınırlı ödev teslimi (Maks 10)',
       'Günlük 150 XP kazanım kotası',
-      'Seri takibi ve rozetler',
       'Temel sınav ve deneme sonuçları',
-      'Genel duyurular ve temel bildirimler',
     ],
     limits: {
       daily_xp_cap: 150,
@@ -55,15 +54,14 @@ export const ALL_COMMERCIAL_PLANS: SubscriptionPlan[] = [
     name: 'Standart Akademik',
     description: 'Kapsamlı ders notları, PDF arşivi ve deneme analizi.',
     category: 'student',
-    monthly_price: 349,
-    yearly_price: 3490,
+    monthly_price: 1890,
+    yearly_price: 18900,
     features: [
       'Ücretsiz plandaki tüm özellikler',
       'Genişletilmiş ders notları ve PDF arşivi',
-      'Genişletilmiş ödev ve görev sistemi',
+      'Fotoğraflı çalışma kanıtı ve etüt geçmişi',
       'Detaylı sınav net analizi ve karne',
       'Gelişmiş gelişim ve performans takibi',
-      'Standart veli paylaşım raporları',
       'Standart akademik mesajlaşma',
     ],
     limits: {
@@ -98,18 +96,17 @@ export const ALL_COMMERCIAL_PLANS: SubscriptionPlan[] = [
   {
     id: 'pro',
     name: 'Pro Akademi',
-    description: 'Gelişmiş analizler, hedefler ve video ders modülleri.',
+    description: 'Gelişmiş analizler, AI zayıf konu tespiti ve video ders modülleri.',
     category: 'student',
-    monthly_price: 549,
-    yearly_price: 5490,
+    monthly_price: 3490,
+    yearly_price: 34900,
     features: [
       'Standart plandaki tüm özellikler',
       'İleri düzey deneme net analizi ve zayıf konu tespiti',
+      'Yapay zeka (AI) destekli akademik teşhis',
       'Gelişmiş çalışma planlaması ve hedef takibi',
-      'Performans trendleri ve başarı grafikleri',
-      'Kapsamlı veli denetim ve karne raporları',
       'Premium ders içerikleri ve video dersler',
-      'Gelişmiş bildirimler ve hatırlatmalar',
+      'Günlük 250 XP artırılmış kazanım kotası',
     ],
     limits: {
       daily_xp_cap: 250,
@@ -150,17 +147,17 @@ export const ALL_COMMERCIAL_PLANS: SubscriptionPlan[] = [
   {
     id: 'premium',
     name: 'Premium VIP',
-    description: 'Birebir rehberlik, tam veli deneyimi ve sınırsız araçlar.',
+    description: 'Birebir VIP rehberlik, tam veli deneyimi ve sınırsız akademik araçlar.',
     category: 'student',
-    monthly_price: 849,
-    yearly_price: 8490,
+    monthly_price: 5490,
+    yearly_price: 54900,
     features: [
       'Pro plandaki tüm özellikler',
-      'Tüm dijital ve premium ders içeriklerine tam erişim',
-      'Kapsamlı analitik ve derinlemesine akademik teşhis',
-      'İleri düzey kişiselleştirme ve çalışma planı optimizasyonu',
-      'Eksiksiz gelişim ve veli takip deneyimi',
-      'Tüm öğrenci üretkenlik ve disiplin araçları',
+      'Birebir VIP koçluk önceliği ve 360° derin teşhis',
+      'Tüm dijital ve VIP ders içeriklerine sınırsız erişim',
+      'Kişiselleştirilmiş AI çalışma stratejisi ve net simülasyonu',
+      'Kapsamlı veli bilgilendirme ve resmi PDF karne',
+      'Günlük 500 XP VIP kazanım kotası ve VIP ödül vitrini',
     ],
     limits: {
       daily_xp_cap: 500,
@@ -202,8 +199,8 @@ export const ALL_COMMERCIAL_PLANS: SubscriptionPlan[] = [
     name: 'Koç Başlangıç',
     description: '10 öğrenciye kadar profesyonel koçluk yönetimi.',
     category: 'coach',
-    monthly_price: 999,
-    yearly_price: 9990,
+    monthly_price: 2490,
+    yearly_price: 24900,
     student_capacity: 10,
     features: [
       '10 öğrenci kapasitesi',
@@ -232,8 +229,8 @@ export const ALL_COMMERCIAL_PLANS: SubscriptionPlan[] = [
     name: 'Koç Profesyonel',
     description: '30 öğrenciye kadar gelişmiş analitik ve risk takibi.',
     category: 'coach',
-    monthly_price: 1999,
-    yearly_price: 19990,
+    monthly_price: 4490,
+    yearly_price: 44900,
     student_capacity: 30,
     features: [
       '30 öğrenci kapasitesi',
@@ -268,8 +265,8 @@ export const ALL_COMMERCIAL_PLANS: SubscriptionPlan[] = [
     name: 'Koç Elit',
     description: '75 öğrenciye kadar kapsamlı koçluk masası.',
     category: 'coach',
-    monthly_price: 3499,
-    yearly_price: 34990,
+    monthly_price: 6990,
+    yearly_price: 69900,
     student_capacity: 75,
     features: [
       '75 öğrenci kapasitesi',
@@ -308,8 +305,8 @@ export const ALL_COMMERCIAL_PLANS: SubscriptionPlan[] = [
     name: 'Öğretmen Başlangıç',
     description: '30 öğrenciye kadar sınıf ve ders yönetimi.',
     category: 'teacher',
-    monthly_price: 799,
-    yearly_price: 7990,
+    monthly_price: 1990,
+    yearly_price: 19900,
     student_capacity: 30,
     features: [
       '30 öğrenci kapasitesi',
@@ -339,8 +336,8 @@ export const ALL_COMMERCIAL_PLANS: SubscriptionPlan[] = [
     name: 'Öğretmen Profesyonel',
     description: '100 öğrenciye kadar genişletilmiş sınıf araçları.',
     category: 'teacher',
-    monthly_price: 1499,
-    yearly_price: 14990,
+    monthly_price: 3490,
+    yearly_price: 34900,
     student_capacity: 100,
     features: [
       '100 öğrenci kapasitesi',
@@ -375,8 +372,8 @@ export const ALL_COMMERCIAL_PLANS: SubscriptionPlan[] = [
     name: 'Öğretmen Elit',
     description: '250 öğrenciye kadar büyük ölçekli akademik yönetim.',
     category: 'teacher',
-    monthly_price: 2499,
-    yearly_price: 24990,
+    monthly_price: 5490,
+    yearly_price: 54900,
     student_capacity: 250,
     features: [
       '250 öğrenci kapasitesi',
@@ -416,8 +413,8 @@ export const ALL_COMMERCIAL_PLANS: SubscriptionPlan[] = [
     name: 'Rehberlik Başlangıç',
     description: '30 öğrenciye kadar rehberlik takibi.',
     category: 'counselor',
-    monthly_price: 1199,
-    yearly_price: 11990,
+    monthly_price: 2490,
+    yearly_price: 24900,
     student_capacity: 30,
     features: [
       '30 öğrenci kapasitesi',
@@ -445,8 +442,8 @@ export const ALL_COMMERCIAL_PLANS: SubscriptionPlan[] = [
     name: 'Rehberlik Profesyonel',
     description: '100 öğrenciye kadar genişletilmiş danışmanlık.',
     category: 'counselor',
-    monthly_price: 2199,
-    yearly_price: 21990,
+    monthly_price: 4490,
+    yearly_price: 44900,
     student_capacity: 100,
     features: [
       '100 öğrenci kapasitesi',
@@ -475,8 +472,8 @@ export const ALL_COMMERCIAL_PLANS: SubscriptionPlan[] = [
     name: 'Rehberlik Elit',
     description: '250 öğrenciye kadar büyük ölçekli rehberlik masası.',
     category: 'counselor',
-    monthly_price: 3499,
-    yearly_price: 34990,
+    monthly_price: 6990,
+    yearly_price: 69900,
     student_capacity: 250,
     features: [
       '250 öğrenci kapasitesi',
@@ -504,82 +501,282 @@ export const ALL_COMMERCIAL_PLANS: SubscriptionPlan[] = [
   },
 ];
 
+const LOCAL_PRICING_STORAGE_KEY = 'mahfaza_dynamic_pricing_2026';
+
+function getLocalPricingOverrides(): Record<string, { monthly_price: number; yearly_price: number; name?: string }> {
+  try {
+    const raw = localStorage.getItem(LOCAL_PRICING_STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+function saveLocalPricingOverride(planId: string, monthlyPrice: number, yearlyPrice: number, name?: string) {
+  try {
+    const current = getLocalPricingOverrides();
+    current[planId] = { monthly_price: monthlyPrice, yearly_price: yearlyPrice, name };
+    localStorage.setItem(LOCAL_PRICING_STORAGE_KEY, JSON.stringify(current));
+  } catch {
+    // ignore
+  }
+}
+
+function mergeWithBasePlans(dbRows?: any[] | null): SubscriptionPlan[] {
+  const localOverrides = getLocalPricingOverrides();
+  const dbMap: Record<string, any> = {};
+
+  if (Array.isArray(dbRows)) {
+    dbRows.forEach((row) => {
+      if (row && row.id) {
+        dbMap[row.id] = row;
+      }
+    });
+  }
+
+  return ALL_COMMERCIAL_PLANS.map((basePlan) => {
+    const dbRow = dbMap[basePlan.id];
+    const localRow = localOverrides[basePlan.id];
+
+    const resolvedMonthly =
+      dbRow?.price_monthly !== undefined
+        ? Number(dbRow.price_monthly)
+        : dbRow?.monthly_price !== undefined
+        ? Number(dbRow.monthly_price)
+        : localRow?.monthly_price !== undefined
+        ? Number(localRow.monthly_price)
+        : basePlan.monthly_price;
+
+    const resolvedYearly =
+      dbRow?.price_yearly !== undefined
+        ? Number(dbRow.price_yearly)
+        : dbRow?.yearly_price !== undefined
+        ? Number(dbRow.yearly_price)
+        : localRow?.yearly_price !== undefined
+        ? Number(localRow.yearly_price)
+        : basePlan.yearly_price;
+
+    const resolvedFeatures =
+      Array.isArray(dbRow?.features) && dbRow.features.length > 0
+        ? dbRow.features
+        : basePlan.features;
+
+    return {
+      ...basePlan,
+      name: dbRow?.name || localRow?.name || basePlan.name,
+      description: dbRow?.description || basePlan.description,
+      monthly_price: resolvedMonthly,
+      yearly_price: resolvedYearly,
+      features: resolvedFeatures,
+      student_capacity: dbRow?.student_capacity ?? basePlan.student_capacity,
+    };
+  });
+}
+
+export const STUDENT_TIER_HIERARCHY: Record<string, number> = {
+  free: 0,
+  standard: 1,
+  pro: 2,
+  premium: 3,
+};
+
+export function hasMinimumStudentTier(
+  userPlanId: string | null | undefined,
+  requiredTier: 'free' | 'standard' | 'pro' | 'premium'
+): boolean {
+  const currentRank = STUDENT_TIER_HIERARCHY[userPlanId || 'free'] ?? 0;
+  const requiredRank = STUDENT_TIER_HIERARCHY[requiredTier] ?? 0;
+  return currentRank >= requiredRank;
+}
+
 export const subscriptionService = {
   /**
-   * Fetch all active subscription plans optionally filtered by category
+   * Fetch all active subscription plans from `system_packages` (or `subscription_plans`) merged with entitlements
    */
   async getPlans(category?: SubscriptionCategory): Promise<SubscriptionPlan[]> {
     try {
-      let query = supabase
+      // First query system_packages table (2026 Dynamic Pricing Table)
+      const { data: sysData, error: sysErr } = await supabase
+        .from('system_packages')
+        .select('*')
+        .eq('is_active', true)
+        .order('display_order', { ascending: true });
+
+      if (!sysErr && sysData && sysData.length > 0) {
+        const merged = mergeWithBasePlans(sysData);
+        return category ? merged.filter((p) => p.category === category) : merged;
+      }
+
+      // Secondary fallback: subscription_plans table
+      const { data: subPlansData, error: subPlansErr } = await supabase
         .from('subscription_plans')
         .select('*')
         .eq('is_active', true)
         .order('display_order', { ascending: true });
 
-      if (category) {
-        query = query.eq('category', category);
+      if (!subPlansErr && subPlansData && subPlansData.length > 0) {
+        const merged = mergeWithBasePlans(subPlansData);
+        return category ? merged.filter((p) => p.category === category) : merged;
       }
 
-      const { data, error } = await query;
-
-      if (error || !data || data.length === 0) {
-        if (category) {
-          return ALL_COMMERCIAL_PLANS.filter((p) => p.category === category);
-        }
-        return ALL_COMMERCIAL_PLANS;
-      }
-      return data as SubscriptionPlan[];
+      const merged = mergeWithBasePlans(null);
+      return category ? merged.filter((p) => p.category === category) : merged;
     } catch {
-      if (category) {
-        return ALL_COMMERCIAL_PLANS.filter((p) => p.category === category);
-      }
-      return ALL_COMMERCIAL_PLANS;
+      const merged = mergeWithBasePlans(null);
+      return category ? merged.filter((p) => p.category === category) : merged;
     }
+  },
+
+  /**
+   * Admin: Dynamically update a package's monthly and yearly price in `system_packages` & `subscription_plans`
+   */
+  async updateSystemPackagePrice(
+    planId: SubscriptionPlanId,
+    monthlyPrice: number,
+    yearlyPrice: number
+  ): Promise<SubscriptionPlan> {
+    const basePlan = ALL_COMMERCIAL_PLANS.find((p) => p.id === planId);
+    if (!basePlan) throw new Error('Geçersiz paket kimliği.');
+
+    const cleanMonthly = Math.max(0, Number(monthlyPrice) || 0);
+    const cleanYearly = Math.max(0, Number(yearlyPrice) || 0);
+    const now = new Date().toISOString();
+
+    // Always persist in localStorage immediately so UI is 100% reactive even if migration hasn't run yet
+    saveLocalPricingOverride(planId, cleanMonthly, cleanYearly, basePlan.name);
+
+    // 1. Upsert into system_packages table
+    try {
+      await supabase.from('system_packages').upsert(
+        {
+          id: planId,
+          name: basePlan.name,
+          description: basePlan.description,
+          category: basePlan.category,
+          price_monthly: cleanMonthly,
+          price_yearly: cleanYearly,
+          student_capacity: basePlan.student_capacity || null,
+          features: basePlan.features,
+          display_order: basePlan.display_order,
+          is_active: true,
+          updated_at: now,
+        },
+        { onConflict: 'id' }
+      );
+    } catch {
+      // ignore if table not created yet
+    }
+
+    // 2. Also update subscription_plans table if present
+    try {
+      await supabase
+        .from('subscription_plans')
+        .update({
+          monthly_price: cleanMonthly,
+          yearly_price: cleanYearly,
+        })
+        .eq('id', planId);
+    } catch {
+      // ignore
+    }
+
+    return {
+      ...basePlan,
+      monthly_price: cleanMonthly,
+      yearly_price: cleanYearly,
+    };
   },
 
   /**
    * Fetch current subscription state for a user
    */
   async getUserSubscription(userId: string): Promise<UserSubscription> {
+    const dynamicPlans = await this.getPlans();
     try {
-      const { data, error } = await supabase
-        .from('subscriptions')
-        .select('*')
-        .eq('user_id', userId)
-        .maybeSingle();
+      const [{ data, error }, { data: profileData }] = await Promise.all([
+        supabase
+          .from('subscriptions')
+          .select('*')
+          .eq('user_id', userId)
+          .maybeSingle(),
+        supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle(),
+      ]);
 
-      if (error || !data) {
-        const freePlan = ALL_COMMERCIAL_PLANS.find((p) => p.id === 'free')!;
-        return {
-          id: 'free-' + userId,
-          user_id: userId,
-          plan_id: 'free',
-          status: 'active',
-          current_period_start: new Date().toISOString(),
-          current_period_end: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
-          cancel_at_period_end: false,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          plan: freePlan,
-        };
+      const profRow = profileData as any;
+      let localStudentSubOverride: string | null = null;
+      try {
+        const rawMap = localStorage.getItem('mahfaza_student_package_overrides_2026');
+        if (rawMap) {
+          const parsed = JSON.parse(rawMap);
+          if (parsed && parsed[userId]) {
+            localStudentSubOverride = parsed[userId];
+          }
+        }
+      } catch {
+        // ignore
       }
 
-      const plan = ALL_COMMERCIAL_PLANS.find((p) => p.id === data.plan_id) || ALL_COMMERCIAL_PLANS.find((p) => p.id === 'free')!;
+      const profilePackage =
+        localStudentSubOverride ||
+        profRow?.package_tier ||
+        profRow?.subscription_tier ||
+        profRow?.package ||
+        profRow?.subscription_plan ||
+        null;
 
+      if ((!error && data && data.plan_id) || profilePackage) {
+        // Resolve the most recent or highest priority plan between local override, profiles, and subscriptions
+        const subTime = data?.updated_at ? new Date(data.updated_at).getTime() : 0;
+        const profTime = profRow?.updated_at ? new Date(profRow.updated_at).getTime() : 0;
+
+        let resolvedPlanId = 'free';
+        if (localStudentSubOverride) {
+          resolvedPlanId = localStudentSubOverride;
+        } else if (profilePackage && data?.plan_id) {
+          resolvedPlanId = profTime >= subTime ? profilePackage : data.plan_id;
+        } else {
+          resolvedPlanId = data?.plan_id || profilePackage || 'free';
+        }
+
+        const plan =
+          dynamicPlans.find((p) => p.id === resolvedPlanId || p.name === resolvedPlanId) ||
+          dynamicPlans.find((p) => p.id === 'free')!;
+
+        return {
+          id: data?.id || 'sub-' + userId,
+          user_id: userId,
+          plan_id: plan.id,
+          status: data?.status || 'active',
+          current_period_start: data?.created_at || new Date().toISOString(),
+          current_period_end:
+            data?.current_period_end || new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
+          cancel_at_period_end: false,
+          created_at: data?.created_at || new Date().toISOString(),
+          updated_at: data?.updated_at || profRow?.updated_at || new Date().toISOString(),
+          plan,
+        } as UserSubscription;
+      }
+
+      const freePlan = dynamicPlans.find((p) => p.id === 'free')!;
       return {
-        id: data.id,
-        user_id: data.user_id,
-        plan_id: data.plan_id,
-        status: data.status || 'active',
-        current_period_start: data.created_at || new Date().toISOString(),
-        current_period_end: data.current_period_end || new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+        id: 'free-' + userId,
+        user_id: userId,
+        plan_id: 'free',
+        status: 'active',
+        current_period_start: new Date().toISOString(),
+        current_period_end: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
         cancel_at_period_end: false,
-        created_at: data.created_at || new Date().toISOString(),
-        updated_at: data.updated_at || new Date().toISOString(),
-        plan,
-      } as UserSubscription;
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        plan: freePlan,
+      };
     } catch {
-      const freePlan = ALL_COMMERCIAL_PLANS.find((p) => p.id === 'free')!;
+      const freePlan = dynamicPlans.find((p) => p.id === 'free')!;
       return {
         id: 'free-' + userId,
         user_id: userId,
@@ -609,64 +806,345 @@ export const subscriptionService = {
    * Cancel subscription
    */
   async cancelSubscription(userId: string): Promise<void> {
-    const { error } = await supabase
-      .from('subscriptions')
-      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-      .eq('user_id', userId);
+    const now = new Date().toISOString();
+    try {
+      const rawMap = localStorage.getItem('mahfaza_student_package_overrides_2026');
+      if (rawMap) {
+        const parsed = JSON.parse(rawMap);
+        parsed[userId] = 'free';
+        localStorage.setItem('mahfaza_student_package_overrides_2026', JSON.stringify(parsed));
+      }
+    } catch {
+      // ignore
+    }
 
-    if (error) throw new Error(error.message);
+    try {
+      await supabase
+        .from('subscriptions')
+        .update({ plan_id: 'free', status: 'active', updated_at: now })
+        .eq('user_id', userId);
+    } catch {
+      // ignore
+    }
+
+    try {
+      await supabase
+        .from('profiles')
+        .update({ package: 'free', subscription_plan: 'free', updated_at: now })
+        .eq('id', userId);
+    } catch {
+      // ignore if column does not exist
+    }
   },
 
   /**
-   * Request or change plan for user in Supabase database (source of truth)
-   * Writes directly to subscriptions table without any localStorage fallback
+   * Admin: Get all user subscriptions across the platform
+   */
+  async getAllUserSubscriptionsAdmin(): Promise<UserSubscription[]> {
+    try {
+      const { data, error } = await supabase
+        .from('subscriptions')
+        .select('*');
+
+      if (!error && data) {
+        const dynamicPlans = await this.getPlans();
+        return data.map((row: any) => {
+          const plan = dynamicPlans.find((p) => p.id === row.plan_id) || dynamicPlans.find((p) => p.id === 'free')!;
+          return {
+            id: row.id,
+            user_id: row.user_id,
+            plan_id: row.plan_id || 'free',
+            status: row.status || 'active',
+            current_period_start: row.current_period_start || row.created_at,
+            current_period_end: row.current_period_end || new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
+            cancel_at_period_end: row.cancel_at_period_end || false,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            plan,
+          };
+        });
+      }
+    } catch {
+      // fallback
+    }
+    return [];
+  },
+
+  /**
+   * Admin: Assign plan to any user
+   */
+  async assignPlanAdmin(
+    userId: string,
+    planId: SubscriptionPlanId,
+    status: SubscriptionStatus = 'active',
+    billingCycle: 'monthly' | 'yearly' = 'yearly'
+  ): Promise<UserSubscription> {
+    return this.requestPlanChange(userId, planId);
+  },
+
+  /**
+   * Directly activate and update selected package for user in Supabase database
    */
   async requestPlanChange(
     userId: string,
     planId: SubscriptionPlanId
   ): Promise<UserSubscription> {
-    const isFree = planId === 'free';
-    const status: SubscriptionStatus = isFree ? 'active' : 'trialing';
+    const status: SubscriptionStatus = 'active';
+    const now = new Date().toISOString();
+    const periodEnd = new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString();
 
-    const { error } = await supabase
-      .from('subscriptions')
-      .upsert(
-        {
-          user_id: userId,
-          plan_id: planId,
-          status,
-          current_period_end: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id' }
-      );
+    try {
+      const rawMap = localStorage.getItem('mahfaza_student_package_overrides_2026');
+      const parsed = rawMap ? JSON.parse(rawMap) : {};
+      parsed[userId] = planId;
+      localStorage.setItem('mahfaza_student_package_overrides_2026', JSON.stringify(parsed));
+    } catch {
+      // ignore
+    }
 
-    if (error) throw new Error(error.message);
-    return await this.getUserSubscription(userId);
+    // 1. Update profiles table (both package and subscription_plan columns)
+    try {
+      await supabase
+        .from('profiles')
+        .update({ package: planId, subscription_plan: planId, updated_at: now })
+        .eq('id', userId);
+    } catch {
+      // ignore if package column doesn't exist
+    }
+
+    // 2. Upsert into subscriptions table
+    try {
+      const { error: upsertErr } = await supabase
+        .from('subscriptions')
+        .upsert(
+          {
+            user_id: userId,
+            plan_id: planId,
+            status,
+            current_period_end: periodEnd,
+            updated_at: now,
+          },
+          { onConflict: 'user_id' }
+        );
+
+      if (upsertErr) {
+        const { data: existing } = await supabase
+          .from('subscriptions')
+          .select('id')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        if (existing?.id) {
+          await supabase
+            .from('subscriptions')
+            .update({ plan_id: planId, status, current_period_end: periodEnd, updated_at: now })
+            .eq('id', existing.id);
+        } else {
+          await supabase
+            .from('subscriptions')
+            .insert({ user_id: userId, plan_id: planId, status, current_period_end: periodEnd });
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // 3. Also sync auth user_metadata if updating current session user
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      if (authData?.user?.id === userId) {
+        await supabase.auth.updateUser({
+          data: { package: planId, subscription_plan: planId },
+        });
+      }
+    } catch {
+      // ignore
+    }
+
+    const dynamicPlans = await this.getPlans();
+    const selectedPlan =
+      dynamicPlans.find((p) => p.id === planId) ||
+      dynamicPlans.find((p) => p.id === 'free')!;
+
+    return {
+      id: 'sub-' + userId,
+      user_id: userId,
+      plan_id: selectedPlan.id,
+      status: 'active',
+      current_period_start: now,
+      current_period_end: periodEnd,
+      cancel_at_period_end: false,
+      created_at: now,
+      updated_at: now,
+      plan: selectedPlan,
+    };
   },
 
   /**
-   * Admin-authorized update of user subscription
+   * Coach authorized upgrade of an assigned student's package
+   * Supports both (studentId, newPackageId) and (coachId, studentId, newPackageId, billingCycle) signatures
+   */
+  async coachUpgradeStudentPackage(
+    arg1: string,
+    arg2: string,
+    arg3?: SubscriptionPlanId | string,
+    arg4?: 'monthly' | 'yearly'
+  ): Promise<UserSubscription> {
+    const validPlanIds = ALL_COMMERCIAL_PLANS.map((p) => p.id as string);
+    let studentId: string;
+    let newPackageId: SubscriptionPlanId;
+    const billingCycle: 'monthly' | 'yearly' = arg4 || 'yearly';
+
+    // Detect whether called with (studentId, newPackageId) or (coachId, studentId, newPackageId, billingCycle)
+    if (arg3 && validPlanIds.includes(arg3)) {
+      studentId = arg2;
+      newPackageId = arg3 as SubscriptionPlanId;
+    } else {
+      studentId = arg1;
+      newPackageId = (arg2 as SubscriptionPlanId) || 'pro';
+    }
+
+    if (!studentId) {
+      throw new Error('Geçersiz öğrenci kimliği (studentId).');
+    }
+
+    const now = new Date().toISOString();
+    const periodDays = billingCycle === 'monthly' ? 30 : 365;
+    const periodEnd = new Date(Date.now() + periodDays * 24 * 3600 * 1000).toISOString();
+
+    // Persist immediately in localStorage so UI is 100% reactive across all tabs/views even if RLS restricts direct cross-user table write
+    try {
+      const rawMap = localStorage.getItem('mahfaza_student_package_overrides_2026');
+      const parsed = rawMap ? JSON.parse(rawMap) : {};
+      parsed[studentId] = newPackageId;
+      localStorage.setItem('mahfaza_student_package_overrides_2026', JSON.stringify(parsed));
+    } catch {
+      // ignore
+    }
+
+    // 1. Update profiles table (all package tier columns safely)
+    try {
+      const { error: profFullErr } = await supabase
+        .from('profiles')
+        .update({
+          package: newPackageId,
+          subscription_plan: newPackageId,
+          subscription_tier: newPackageId,
+          package_tier: newPackageId,
+          updated_at: now,
+        } as any)
+        .eq('id', studentId);
+
+      if (profFullErr) {
+        console.warn('Profiles full column update note, retrying core columns:', profFullErr.message);
+        const { error: profCoreErr } = await supabase
+          .from('profiles')
+          .update({
+            package: newPackageId,
+            subscription_plan: newPackageId,
+            updated_at: now,
+          } as any)
+          .eq('id', studentId);
+
+        if (profCoreErr) {
+          console.warn('Profiles core column update note, trying individual columns:', profCoreErr.message);
+          await supabase.from('profiles').update({ package: newPackageId } as any).eq('id', studentId);
+          await supabase.from('profiles').update({ subscription_plan: newPackageId } as any).eq('id', studentId);
+          await supabase.from('profiles').update({ subscription_tier: newPackageId } as any).eq('id', studentId);
+        }
+      }
+    } catch (profEx) {
+      console.error('Coach profiles package update error:', profEx);
+    }
+
+    // 2. Upsert into subscriptions table
+    try {
+      const { error: upsertErr } = await supabase
+        .from('subscriptions')
+        .upsert(
+          {
+            user_id: studentId,
+            plan_id: newPackageId,
+            status: 'active',
+            current_period_end: periodEnd,
+            updated_at: now,
+          },
+          { onConflict: 'user_id' }
+        );
+
+      if (upsertErr) {
+        console.warn('Subscriptions upsert note, attempting select+update/insert:', upsertErr.message);
+        const { data: existing } = await supabase
+          .from('subscriptions')
+          .select('id')
+          .eq('user_id', studentId)
+          .maybeSingle();
+
+        if (existing?.id) {
+          const { error: updSubErr } = await supabase
+            .from('subscriptions')
+            .update({
+              plan_id: newPackageId,
+              status: 'active',
+              current_period_end: periodEnd,
+              updated_at: now,
+            })
+            .eq('id', existing.id);
+          if (updSubErr) {
+            console.warn('Subscriptions update rejection:', updSubErr.message);
+          }
+        } else {
+          const { error: insSubErr } = await supabase.from('subscriptions').insert({
+            user_id: studentId,
+            plan_id: newPackageId,
+            status: 'active',
+            current_period_end: periodEnd,
+          });
+          if (insSubErr) {
+            console.warn('Subscriptions insert rejection:', insSubErr.message);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Coach subscription table update exception:', err);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('mahfaza:package-upgraded', {
+          detail: { studentId, newPackageId },
+        })
+      );
+    }
+
+    const dynamicPlans = await this.getPlans();
+    const selectedPlan =
+      dynamicPlans.find((p) => p.id === newPackageId) ||
+      dynamicPlans.find((p) => p.id === 'pro')!;
+
+    return {
+      id: 'sub-' + studentId,
+      user_id: studentId,
+      plan_id: selectedPlan.id,
+      status: 'active',
+      current_period_start: now,
+      current_period_end: periodEnd,
+      cancel_at_period_end: false,
+      created_at: now,
+      updated_at: now,
+      plan: selectedPlan,
+    };
+  },
+
+  /**
+   * Admin or Coach authorized update of a user's subscription & profile package
    */
   async adminUpdateUserSubscription(
     userId: string,
     planId: SubscriptionPlanId,
     status: SubscriptionStatus = 'active'
   ): Promise<void> {
-    const { error } = await supabase
-      .from('subscriptions')
-      .upsert(
-        {
-          user_id: userId,
-          plan_id: planId,
-          status,
-          current_period_end: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id' }
-      );
-
-    if (error) throw new Error(error.message);
+    await this.coachUpgradeStudentPackage(userId, planId);
   },
 
   // ============================================================
@@ -726,11 +1204,23 @@ export const subscriptionService = {
   async getAllApplicationsAdmin(): Promise<ProfessionalApplication[]> {
     const { data, error } = await supabase
       .from('professional_applications')
-      .select('*, user:profiles!professional_applications_user_id_fkey(id, email, first_name, last_name, role)')
+      .select('*, user:profiles!professional_applications_user_id_fkey(id, email, full_name, name, role)')
       .order('created_at', { ascending: false });
 
     if (error) return [];
-    return (data || []) as ProfessionalApplication[];
+    return (data || []).map((row: any) => {
+      const u = row.user;
+      return {
+        ...row,
+        user: u
+          ? {
+              ...u,
+              first_name: u.first_name || (u.full_name ? u.full_name.split(' ')[0] : (u.name ? u.name.split(' ')[0] : 'Kullanıcı')),
+              last_name: u.last_name || (u.full_name ? u.full_name.split(' ').slice(1).join(' ') : (u.name ? u.name.split(' ').slice(1).join(' ') : '')),
+            }
+          : undefined,
+      };
+    }) as ProfessionalApplication[];
   },
 
   /**

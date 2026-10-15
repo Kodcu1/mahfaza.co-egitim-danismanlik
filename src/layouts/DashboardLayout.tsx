@@ -3,7 +3,6 @@ import { Outlet, Navigate } from 'react-router-dom';
 import { useAuth } from '../features/auth/AuthContext';
 import { Sidebar } from '../components/Sidebar';
 import { Navbar } from '../components/Navbar';
-import { DatabaseStatusBanner } from '../components/DatabaseStatusBanner';
 import { LoadingState } from '../components/ui/EmptyState';
 import { UserRole } from '../types';
 
@@ -17,7 +16,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ allowedRoles }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <LoadingState message="Oturum ve yetki matrisi doğrulanıyor..." />
       </div>
     );
@@ -41,8 +40,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ allowedRoles }
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans">
-      <DatabaseStatusBanner />
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans">
       <div className="flex-1 flex">
         <Sidebar
           role={effectiveRole as UserRole}

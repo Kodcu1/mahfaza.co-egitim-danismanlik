@@ -1,7 +1,15 @@
 import { jsPDF } from 'jspdf';
 import { CoachParentMeeting, Profile } from '../types/index';
+import {
+  triggerReliablePdfDownload,
+  drawPremiumCorporateHeader,
+  drawSectionHeader,
+  MAHFAZA_LOGO_BASE64,
+} from './student360PdfGenerator';
 
-interface ParentMeetingReportData {
+export { MAHFAZA_LOGO_BASE64 };
+
+export interface ParentMeetingReportData {
   meeting: CoachParentMeeting;
   student?: Profile | null;
   coachName?: string;
@@ -9,8 +17,8 @@ interface ParentMeetingReportData {
 }
 
 // Helper to safely format Turkish characters for standard PDF fonts
-function sanitizeText(str?: string | null): string {
-  if (!str) return 'Belirtilmedi';
+export function sanitizeText(str?: string | null): string {
+  if (!str) return '';
   return str
     .replace(/ğ/g, 'g')
     .replace(/Ğ/g, 'G')
@@ -43,244 +51,185 @@ export function generateParentMeetingPDF(data: ParentMeetingReportData): void {
     ? new Date(meeting.meeting_date).toLocaleDateString('tr-TR')
     : new Date().toLocaleDateString('tr-TR');
 
+  const totalPages = 1;
+
   const renderHeader = (pageNumber: number) => {
-    // Header Bar (Mahfaza Dark Charcoal)
-    doc.setFillColor(24, 24, 27); // zinc-900
-    doc.rect(0, 0, 210, 34, 'F');
-
-    // Gold accent bar
-    doc.setFillColor(217, 119, 6); // amber-600
-    doc.rect(0, 34, 210, 1.5, 'F');
-
-    // Title & Logo
-    doc.setTextColor(251, 191, 36); // amber-400
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text('MAHFAZA.CO', 14, 13);
-
-    doc.setTextColor(244, 244, 245); // zinc-100
-    doc.setFontSize(10.5);
-    doc.setFont('helvetica', 'normal');
-    doc.text('VELI GORUSME FORMU VE AKADEMIK RAPORU', 14, 21);
-
-    doc.setFontSize(8);
-    doc.setTextColor(161, 161, 170); // zinc-400
-    doc.text(
-      `Gorusme Tarihi: ${meetingDateFormatted}  |  Koc: ${sanitizeText(data.coachName || 'Atanmis Koc')}  |  Sayfa ${pageNumber}`,
-      14,
-      28
+    drawPremiumCorporateHeader(
+      doc,
+      'VELI GORUSME TUTANAGI VE AKADEMIK DEGERLENDIRME RAPORU',
+      `Gorusme Tarihi: ${meetingDateFormatted}   |   Danisman Koc: ${sanitizeText(data.coachName || 'Atanmis Koc')}   |   Sayfa ${pageNumber} / ${totalPages}`
     );
   };
 
+  const renderFooter = (pageNumber: number) => {
+    doc.setDrawColor(184, 134, 11);
+    doc.line(14, 278, 196, 278);
+
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(184, 134, 11);
+    doc.text('MAHFAZA.CO KURUMSAL AKADEMIK RAPORLAMA SISTEMI', 14, 283);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(113, 113, 122);
+    doc.text(`Veli Gorusme Arsivi  |  Sayfa ${pageNumber} / ${totalPages}`, 148, 283);
+  };
+
   renderHeader(1);
+  renderFooter(1);
 
-  let y = 44;
+  let y = 48;
 
-  // SECTION 1: MEETING & PARTICIPANT INFORMATION
-  doc.setTextColor(24, 24, 27);
-  doc.setFontSize(10.5);
-  doc.setFont('helvetica', 'bold');
-  doc.text('1. GORUSME VE KATILIMCI BILGILERI', 14, y);
-  y += 2;
+  // SECTION 1: MEETING & PARTICIPANT INFORMATION TABLE
+  y = drawSectionHeader(doc, '1. GORUSME KIMLIK VE KATILIMCI BILGILERI', y);
 
-  doc.setDrawColor(212, 212, 216);
-  doc.line(14, y, 196, y);
-  y += 6;
-
-  doc.setFontSize(8.5);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(63, 63, 70);
+  doc.setFillColor(250, 250, 252);
+  doc.setDrawColor(184, 134, 11);
+  doc.setLineWidth(0.25);
+  doc.rect(14, y - 2, 182, 22, 'FD');
 
   const meetingTypeLabel =
     meeting.meeting_type === 'online'
       ? 'Online (Google Meet / Zoom)'
       : meeting.meeting_type === 'phone'
       ? 'Telefon Gorusmesi'
-      : 'Yuz Yuze Gorusme';
+      : 'Yuz Yuze Kurumsal Gorusme';
 
   const leftInfo = [
-    `Danisan Ogrenci: ${sanitizeText(studentName)}`,
-    `Gorusulen Veli: ${sanitizeText(meeting.parent_name || 'Veli')}`,
-    `Iletisim Numarasi: ${sanitizeText(meeting.parent_phone || 'Kayitli telefon yok')}`,
+    ['Danisan Ogrenci:', sanitizeText(studentName)],
+    ['Gorusulen Veli:', sanitizeText(meeting.parent_name || 'Ogrenci Velisi')],
+    ['Iletisim Bilgisi:', sanitizeText(meeting.parent_phone || 'Kayitli telefon yok')],
   ];
 
   const rightInfo = [
-    `Gorusme Turu: ${meetingTypeLabel}`,
-    `Gorusme Saati: ${meeting.meeting_time || '16:00'}`,
-    `Hedef Program: ${data.isYksStudent !== false ? 'YKS (TYT-AYT) Calisma Grubu' : 'Akademik Gelisim Portfoyu'}`,
+    ['Gorusme Formati:', meetingTypeLabel],
+    ['Tarih ve Saat:', `${meetingDateFormatted} - ${meeting.meeting_time || '16:00'}`],
+    ['Gorusme Statu:', sanitizeText(meeting.status || 'Planlandi')],
   ];
 
-  leftInfo.forEach((line, idx) => {
-    doc.text(line, 14, y + idx * 5);
-  });
-  rightInfo.forEach((line, idx) => {
-    doc.text(line, 105, y + idx * 5);
-  });
-  y += 18;
-
-  // SECTION 2: MEETING SUBJECT & FACTUAL OBSERVATIONS
-  doc.setFontSize(10.5);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(24, 24, 27);
-  doc.text('2. GORUSME KONULARI VE KOC DEGERLENDIRMESI', 14, y);
-  y += 2;
-  doc.line(14, y, 196, y);
-  y += 6;
-
-  // Academic Observation Box
   doc.setFontSize(8.5);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(24, 24, 27);
-  doc.text('Akademik Durum ve Deneme Performansi:', 14, y);
-  y += 4;
-
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(63, 63, 70);
-  const academicNotes = meeting.academic_evaluation || 'Ogrencinin deneme netleri ve haftalik calisma disiplini hedeflenen program cercevesinde takip edilmektedir.';
-  const splitAcademic = doc.splitTextToSize(sanitizeText(academicNotes), 182);
-  doc.text(splitAcademic, 14, y);
-  y += splitAcademic.length * 4 + 3;
-
-  // Parent Observations Box
-  if (meeting.raw_notes || meeting.notes) {
+  leftInfo.forEach(([label, val], idx) => {
+    const rowY = y + 3 + idx * 6;
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(24, 24, 27);
-    doc.text('Veli Geri Bildirimi ve Ev Calisma Ortami:', 14, y);
-    y += 4;
-
+    doc.setTextColor(184, 134, 11);
+    doc.text(label, 18, rowY);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(63, 63, 70);
-    const splitNotes = doc.splitTextToSize(sanitizeText(meeting.raw_notes || meeting.notes), 182);
-    doc.text(splitNotes, 14, y);
-    y += splitNotes.length * 4 + 3;
-  }
+    doc.setTextColor(39, 39, 42);
+    doc.text(val.slice(0, 35), 48, rowY);
+  });
 
-  // Action items Box
-  if (meeting.action_plan || meeting.action_items) {
+  rightInfo.forEach(([label, val], idx) => {
+    const rowY = y + 3 + idx * 6;
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(24, 24, 27);
-    doc.text('Alinan Kararlar ve Haftalik Aksiyon Plani:', 14, y);
-    y += 4;
-
+    doc.setTextColor(184, 134, 11);
+    doc.text(label, 108, rowY);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(63, 63, 70);
-    const splitAction = doc.splitTextToSize(sanitizeText(meeting.action_plan || meeting.action_items), 182);
-    doc.text(splitAction, 14, y);
-    y += splitAction.length * 4 + 3;
-  }
+    doc.setTextColor(39, 39, 42);
+    doc.text(val.slice(0, 34), 140, rowY);
+  });
 
-  // Next meeting date
-  if (meeting.next_meeting_date) {
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(217, 119, 6);
-    doc.text(
-      `Planlanan Sonraki Veli Gorusme Tarihi: ${new Date(meeting.next_meeting_date).toLocaleDateString('tr-TR')}`,
-      14,
-      y
-    );
-    y += 6;
-  }
+  y += 28;
 
-  // SECTION 3: PHYSICAL HANDWRITTEN BRANCH TEACHER EVALUATION FORM
-  // Move to page 2 if remaining height on page 1 is not enough for at least 2 teachers
-  if (y > 155) {
-    doc.addPage();
-    renderHeader(2);
-    y = 44;
-  } else {
-    y += 4;
-  }
+  // SECTION 2: STRUCTURED EVALUATION BLOCKS
+  y = drawSectionHeader(doc, '2. AKADEMIK GOZLEMLER VE GORUSME NOTLARI', y);
 
-  doc.setFontSize(10.5);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(24, 24, 27);
-  doc.text('3. BRANS OGRETMENLERI GORUSLERI (EL YAZISI ILE DOLDURULACAK KISIM)', 14, y);
-  y += 2;
-  doc.line(14, y, 196, y);
-  y += 6;
+  const renderEvaluationBox = (boxTitle: string, content: string) => {
+    const lines = doc.splitTextToSize(sanitizeText(content), 174);
+    const boxHeight = Math.max(13, lines.length * 4.3 + 8);
 
-  doc.setFontSize(7.5);
-  doc.setFont('helvetica', 'italic');
-  doc.setTextColor(113, 113, 122);
-  doc.text(
-    'Bu alan veli gorusmesi oncesinde brans ogretmenlerine fiziksel olarak verilip el yazisi ile doldurulmak uzere tasarlanmistir.',
-    14,
-    y
-  );
-  y += 5;
-
-  // Provide 5 blank areas for teachers (especially important for YKS subjects)
-  const teacherCount = 5;
-  for (let i = 1; i <= teacherCount; i++) {
-    if (y > 240) {
+    if (y + boxHeight > 235) {
       doc.addPage();
-      renderHeader(3);
-      y = 44;
+      renderHeader(2);
+      renderFooter(2);
+      y = 48;
     }
+
+    // Box Header Strip
+    doc.setFillColor(244, 244, 246);
+    doc.setDrawColor(212, 212, 216);
+    doc.rect(14, y - 2, 182, boxHeight, 'FD');
+
+    doc.setFillColor(184, 134, 11);
+    doc.rect(14, y - 2, 2.5, boxHeight, 'F');
 
     doc.setFontSize(8.5);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(24, 24, 27);
-    doc.text(
-      `${i}. Brans: ______________________________      Ogretmen: ______________________________`,
-      14,
-      y
-    );
-    y += 4.5;
+    doc.setTextColor(184, 134, 11);
+    doc.text(boxTitle, 19, y + 2.5);
 
-    doc.setFontSize(7.5);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(113, 113, 122);
-    doc.text('Gorus & Oneriler:', 14, y);
-    y += 3.5;
+    doc.setTextColor(39, 39, 42);
+    doc.text(lines, 19, y + 7.5);
 
-    // 4 ruled lines for teacher handwriting
-    doc.setDrawColor(212, 212, 216);
-    doc.line(14, y, 196, y);
-    y += 4.5;
-    doc.line(14, y, 196, y);
-    y += 4.5;
-    doc.line(14, y, 196, y);
-    y += 4.5;
-    doc.line(14, y, 196, y);
-    y += 6;
+    y += boxHeight + 4;
+  };
+
+  if (meeting.teacher_opinions) {
+    renderEvaluationBox('Brans Ogretmenleri Gorus Özeti:', meeting.teacher_opinions);
   }
 
-  // Check page height before signatures
-  if (y > 255) {
-    doc.addPage();
-    renderHeader(doc.getNumberOfPages());
-    y = 44;
-  } else {
-    y = Math.max(y + 2, 258);
+  renderEvaluationBox(
+    'Akademik Durum ve Deneme Performansi:',
+    meeting.academic_evaluation ||
+      'Ogrencinin deneme netleri ve haftalik calisma disiplini hedeflenen program cercevesinde takip edilmektedir.'
+  );
+
+  const rawOrNotes = meeting.raw_notes || meeting.notes;
+  if (rawOrNotes) {
+    renderEvaluationBox('Veli Geri Bildirimi ve Ev Calisma Ortami:', rawOrNotes);
   }
 
-  // SIGNATURE SECTION
+  if (meeting.psychological_status) {
+    renderEvaluationBox('Ogrenci Motivasyon ve Odaklanma Durumu:', meeting.psychological_status);
+  }
+
+  const actionPlanText = meeting.action_plan || meeting.action_items;
+  if (actionPlanText) {
+    renderEvaluationBox('Alinan Kararlar ve Haftalik Aksiyon Plani:', actionPlanText);
+  }
+
+  // Next meeting date banner
+  if (meeting.next_meeting_date) {
+    doc.setFillColor(254, 243, 199);
+    doc.setDrawColor(184, 134, 11);
+    doc.rect(14, y - 1, 182, 8, 'FD');
+    doc.setFontSize(8.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(184, 134, 11);
+    doc.text(
+      `PLANLANAN SONRAKI VELI GORUSME TARIHI: ${new Date(meeting.next_meeting_date).toLocaleDateString('tr-TR')}`,
+      18,
+      y + 4.2
+    );
+    y += 12;
+  }
+
+  // SIGNATURES SECTION
+  const sigY = Math.max(y + 4, 246);
+  doc.setDrawColor(184, 134, 11);
+  doc.setLineWidth(0.3);
+  doc.line(14, sigY, 196, sigY);
+
+  doc.setFillColor(250, 250, 252);
   doc.setDrawColor(212, 212, 216);
-  doc.line(14, y, 196, y);
-  y += 6;
+  doc.rect(14, sigY + 3, 86, 20, 'FD');
+  doc.rect(110, sigY + 3, 86, 20, 'FD');
 
   doc.setFontSize(8.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(24, 24, 27);
-  doc.text('Koc Imzasi: ___________________________', 20, y);
-  doc.text('Veli Imzasi: ___________________________', 115, y);
+  doc.text('DANISMAN KOC IMZASI', 20, sigY + 9);
+  doc.text('KURUM MUDURU IMZASI', 116, sigY + 9);
 
-  // Footer Note
-  doc.setFontSize(7);
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(161, 161, 170);
-  doc.text(
-    'Mahfaza.co Akademik Isletim Sistemi  |  Bu form veli gorusme tutanagi ve resmi arsiv niteligindedir.',
-    14,
-    285
-  );
+  doc.setTextColor(113, 113, 122);
+  doc.text('Imza: _______________________', 20, sigY + 18);
+  doc.text('Imza: _______________________', 116, sigY + 18);
 
-  // Safe filename and trigger download
   const safeStudent = sanitizeText(studentName).replace(/[^a-zA-Z0-9]/g, '_');
   const safeDate = meetingDateFormatted.replace(/\./g, '-');
   const filename = `Mahfaza_Veli_Gorusmesi_${safeStudent}_${safeDate}.pdf`;
 
-  doc.save(filename);
+  triggerReliablePdfDownload(doc, filename);
 }

@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 
 export const CoachTasksPage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [tasks, setTasks] = useState<CoachTask[]>([]);
   const [assignedStudents, setAssignedStudents] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,12 +55,27 @@ export const CoachTasksPage: React.FC = () => {
     if (!user?.id) return;
     try {
       setLoading(true);
-      const [studs, tList] = await Promise.all([
+      let [studs, tList] = await Promise.all([
         relationshipService.getCoachAssignedStudents(user.id),
-        coachTaskService.getTasksForCoach(user.id),
+        coachTaskService.getTasksForCoach(user.id, { email: user?.email, profileId: profile?.id }),
       ]);
+
+      // If no students assigned via pairing yet, load all registered students to enable coach assigning
+      if (!studs || studs.length === 0) {
+        studs = await relationshipService.getProfilesByRole('student');
+      }
+
       setAssignedStudents(studs);
-      setTasks(tList);
+      setTasks((prev) => {
+        const map = new Map<string, CoachTask>();
+        // Keep any active unsaved local tasks
+        prev.forEach((t) => map.set(t.id, t));
+        (tList || []).forEach((t) => map.set(t.id, t));
+        return Array.from(map.values()).sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+      });
+
       if (studs.length > 0 && !selectedStudentId) {
         setSelectedStudentId(studs[0].id);
       }
@@ -69,10 +84,21 @@ export const CoachTasksPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [user?.id, selectedStudentId]);
+  }, [user?.id, user?.email, profile?.id, selectedStudentId]);
 
   useEffect(() => {
     loadData();
+
+    const handleTaskChange = () => {
+      loadData();
+    };
+    window.addEventListener('mahfaza:task_created', handleTaskChange);
+    window.addEventListener('mahfaza:tasks_updated', handleTaskChange);
+
+    return () => {
+      window.removeEventListener('mahfaza:task_created', handleTaskChange);
+      window.removeEventListener('mahfaza:tasks_updated', handleTaskChange);
+    };
   }, [loadData]);
 
   const handleCreateTask = async (e: React.FormEvent) => {
@@ -85,24 +111,40 @@ export const CoachTasksPage: React.FC = () => {
     const studentObj = assignedStudents.find((s) => s.id === selectedStudentId);
 
     try {
-      await coachTaskService.createTask({
+      const created = await coachTaskService.createTask({
         coach_id: user.id,
-        student_id: selectedStudentId,
+        student_id: selectedStudentId, // Authentic UUID
         title: title.trim(),
         description: description.trim() || undefined,
         due_date: new Date(dueDate).toISOString(),
         xp_reward: Number(xpReward),
         student: studentObj,
+        coach: {
+          id: user.id,
+          full_name: profile?.full_name || profile?.name || user?.user_metadata?.full_name || 'Koç',
+          email: user.email,
+        },
       });
 
+      // Immediate state update & guarantee card is visible right away
+      setTasks((prev) => [created, ...prev.filter((t) => t.id !== created.id)]);
       setFeedback('Görev başarıyla oluşturuldu ve öğrenciye atandı!');
       setTitle('');
       setDescription('');
-      await loadData();
       setTimeout(() => {
         setCreateModalOpen(false);
         setFeedback(null);
-      }, 1200);
+      }, 1000);
+
+      // Refresh in background and merge with created task
+      const freshTasks = await coachTaskService.getTasksForCoach(user.id, { email: user?.email, profileId: profile?.id });
+      setTasks((prev) => {
+        const map = new Map(freshTasks.map((t) => [t.id, t]));
+        map.set(created.id, created);
+        return Array.from(map.values()).sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+      });
     } catch (err: any) {
       setFeedback(err.message || 'Görev oluşturulurken hata meydana geldi.');
     } finally {
@@ -131,15 +173,20 @@ export const CoachTasksPage: React.FC = () => {
 
   const handleConfirmReject = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user?.id || !selectedTaskForReject) return;
+    if (!selectedTaskForReject || !rejectionReason.trim()) return;
+
     setRejecting(true);
     try {
-      await coachTaskService.rejectTask(selectedTaskForReject.id, user.id, rejectionReason.trim() || undefined);
+      await coachTaskService.rejectTaskWithFeedback(
+        selectedTaskForReject.id,
+        user?.id || '',
+        rejectionReason.trim()
+      );
       setRejectModalOpen(false);
       setSelectedTaskForReject(null);
       setRejectionReason('');
       await loadData();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Reject error:', err);
     } finally {
       setRejecting(false);
@@ -163,7 +210,6 @@ export const CoachTasksPage: React.FC = () => {
     const isApproved = t.status === 'approved' || t.status === 'verified';
     if (statusFilter === 'all') return true;
     if (statusFilter === 'approved') return isApproved;
-    // 'active' shows both in-progress / not yet completed tasks and those pending review
     return !isApproved;
   });
 
@@ -174,47 +220,46 @@ export const CoachTasksPage: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200/80">
         <div>
-          <span className="text-xs font-mono text-sky-400 uppercase tracking-wider flex items-center gap-1.5">
-            <ClipboardList className="w-3.5 h-3.5" />
+          <span className="text-xs font-semibold text-amber-600 uppercase tracking-wider flex items-center gap-1.5">
+            <ClipboardList className="w-4 h-4" />
             Akademik Görevlendirme
           </span>
-          <h1 className="text-xl sm:text-2xl font-bold text-zinc-100 tracking-tight mt-0.5">
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight mt-1">
             Koçluk Görevleri
           </h1>
-          <p className="text-xs text-zinc-400 mt-1">
-            Öğrencilerinize kişiselleştirilmiş hedefler, konu tekrarları ve soru çözüm ödevleri atayın; tamamlanan görevleri XP ile ödüllendirin.
+          <p className="text-xs text-slate-500 mt-1">
+            Öğrencilerinize kişiselleştirilmiş hedefler, konu tekrarları ve soru çözüm ödevleri atayın; tamamlanan görevleri onaylayarak XP tanımlayın.
           </p>
         </div>
 
         <Button
           variant="primary"
-          size="sm"
+          size="md"
           onClick={() => setCreateModalOpen(true)}
-          leftIcon={<Plus className="w-3.5 h-3.5" />}
-          disabled={assignedStudents.length === 0}
+          leftIcon={<Plus className="w-4 h-4" />}
         >
           Yeni Görev Ata
         </Button>
       </div>
 
-      {/* Filter Tabs: Active/Pending on main screen, completed/approved in separate tab */}
+      {/* Filter Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1">
         <button
           onClick={() => setStatusFilter('active')}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
             statusFilter === 'active'
-              ? 'bg-zinc-800 text-amber-400 shadow-xs'
-              : 'text-zinc-400 hover:text-zinc-200'
+              ? 'bg-amber-50 text-amber-800 border border-amber-200 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
           <span>Aktif & Bekleyen Görevler</span>
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700 text-amber-300">
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-white border border-amber-200 text-amber-700 font-bold">
             {activeCount}
           </span>
           {pendingReviewCount > 0 && (
-            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 animate-pulse">
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500 text-white animate-pulse">
               {pendingReviewCount} Onay Bekliyor
             </span>
           )}
@@ -222,49 +267,48 @@ export const CoachTasksPage: React.FC = () => {
 
         <button
           onClick={() => setStatusFilter('approved')}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
             statusFilter === 'approved'
-              ? 'bg-zinc-800 text-emerald-400 shadow-xs'
-              : 'text-zinc-400 hover:text-zinc-200'
+              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
           <span>Tamamlanan & Onaylananlar</span>
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700 text-emerald-300">
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-white border border-emerald-200 text-emerald-700 font-bold">
             {approvedCount}
           </span>
         </button>
 
         <button
           onClick={() => setStatusFilter('all')}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
             statusFilter === 'all'
-              ? 'bg-zinc-800 text-zinc-100 shadow-xs'
-              : 'text-zinc-400 hover:text-zinc-200'
+              ? 'bg-slate-100 text-slate-900 border border-slate-300 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
           <span>Tüm Görevler</span>
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700 text-zinc-300">
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-white border border-slate-200 text-slate-700 font-bold">
             {tasks.length}
           </span>
         </button>
       </div>
 
       {tasks.length === 0 ? (
-        <Card className="p-8 sm:p-12 text-center border-dashed border-zinc-800 bg-zinc-950/40">
-          <div className="w-12 h-12 rounded-full bg-sky-500/10 border border-sky-500/30 text-sky-400 flex items-center justify-center mx-auto mb-3">
+        <Card className="p-8 sm:p-12 text-center border-dashed border-slate-200 bg-white">
+          <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center mx-auto mb-3">
             <ClipboardList className="w-6 h-6" />
           </div>
-          <h2 className="text-base font-bold text-zinc-100">Henüz Görev Atanmamış</h2>
-          <p className="text-xs text-zinc-400 mt-1 max-w-sm mx-auto leading-relaxed">
+          <h2 className="text-base font-bold text-slate-900">Henüz Görev Atanmamış</h2>
+          <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto leading-relaxed">
             Danışanlarınıza çalışma disiplinini artıracak konu tekrarı, soru çözümü veya deneme analizi görevleri atayın.
           </p>
           <div className="mt-5">
             <Button
               variant="primary"
-              size="sm"
-              leftIcon={<Plus className="w-3.5 h-3.5" />}
+              size="md"
+              leftIcon={<Plus className="w-4 h-4" />}
               onClick={() => setCreateModalOpen(true)}
-              disabled={assignedStudents.length === 0}
             >
               Yeni Görev Ata
             </Button>
@@ -281,15 +325,15 @@ export const CoachTasksPage: React.FC = () => {
             return (
               <div
                 key={task.id}
-                className={`p-4 rounded-xl border transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                className={`p-4 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
                   isPendingReview
-                    ? 'bg-zinc-900/90 border-amber-500/40 shadow-xs'
-                    : 'bg-zinc-900/70 border-zinc-800 hover:border-zinc-700'
+                    ? 'bg-amber-50/40 border-amber-300 shadow-xs'
+                    : 'bg-white border-slate-200/90 hover:border-slate-300 shadow-xs'
                 }`}
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 mb-1">
-                    <h3 className="font-bold text-sm text-zinc-100 truncate">{task.title}</h3>
+                    <h3 className="font-bold text-sm text-slate-900 truncate">{task.title}</h3>
                     <Badge
                       variant={
                         isApproved
@@ -298,56 +342,54 @@ export const CoachTasksPage: React.FC = () => {
                           ? 'warning'
                           : isRejected
                           ? 'danger'
-                          : isCancelled
-                          ? 'danger'
                           : 'neutral'
                       }
                     >
                       {isApproved
-                        ? 'Onaylandı (+XP Verildi)'
+                        ? 'Onaylandı (+XP)'
                         : isPendingReview
-                        ? 'Onay Bekliyor'
+                        ? 'Öğrenci Teslim Etti (Onay Bekliyor)'
                         : isRejected
                         ? 'Revizyon İstendi'
                         : isCancelled
-                        ? 'İptal Edildi'
-                        : 'Teslim Bekliyor'}
+                        ? 'İptal'
+                        : 'Devam Ediyor'}
                     </Badge>
                   </div>
 
                   {task.description && (
-                    <p className="text-xs text-zinc-400 mb-2 line-clamp-2">
+                    <p className="text-xs text-slate-600 line-clamp-2 mb-2">
                       {task.description}
                     </p>
                   )}
 
                   {/* Student Submission Evidence / Note */}
                   {isPendingReview && task.student_note && (
-                    <div className="mt-2 p-2.5 rounded-lg bg-zinc-950/80 border border-amber-500/30 text-xs mb-2">
-                      <span className="text-[10px] text-amber-400 font-mono font-semibold uppercase block mb-0.5 flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> Öğrenci Teslim Kanıtı / Notu:
+                    <div className="mt-2 p-3 rounded-xl bg-amber-50/80 border border-amber-200 text-xs mb-2">
+                      <span className="text-[10px] text-amber-800 font-semibold uppercase block mb-0.5 flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-amber-600" /> Öğrenci Teslim Kanıtı / Notu:
                       </span>
-                      <p className="text-zinc-200">{task.student_note}</p>
+                      <p className="text-slate-800 font-medium">{task.student_note}</p>
                     </div>
                   )}
 
-                  <div className="flex flex-wrap items-center gap-4 text-[11px] text-zinc-500 font-mono">
-                    <span className="flex items-center gap-1 text-zinc-300">
-                      <User className="w-3.5 h-3.5 text-purple-400" />
+                  <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500 font-mono">
+                    <span className="flex items-center gap-1 text-slate-700 font-medium">
+                      <User className="w-3.5 h-3.5 text-amber-600" />
                       {task.student?.first_name} {task.student?.last_name || 'Öğrenci'}
                     </span>
                     <span className="flex items-center gap-1">
-                      <Calendar className="w-3.5 h-3.5" />
+                      <Calendar className="w-3.5 h-3.5 text-slate-400" />
                       Son Tarih: {new Date(task.due_date).toLocaleDateString('tr-TR')}
                     </span>
                     {task.completed_at && (
-                      <span className="flex items-center gap-1 text-sky-400">
+                      <span className="flex items-center gap-1 text-sky-600">
                         <Clock className="w-3.5 h-3.5" />
                         Teslim: {new Date(task.completed_at).toLocaleDateString('tr-TR')}
                       </span>
                     )}
-                    <span className="flex items-center gap-1 text-amber-400 font-bold">
-                      <Award className="w-3.5 h-3.5" />
+                    <span className="flex items-center gap-1 text-amber-700 font-bold">
+                      <Award className="w-3.5 h-3.5 text-amber-500" />
                       +{task.xp_reward} XP
                     </span>
                   </div>
@@ -358,9 +400,9 @@ export const CoachTasksPage: React.FC = () => {
                   {isPendingReview && (
                     <>
                       <Button
-                        variant="secondary"
+                        variant="ghost"
                         size="sm"
-                        className="text-xs text-rose-400 border-rose-900/50 hover:bg-rose-950/50"
+                        className="text-xs text-rose-600 border border-rose-200 hover:bg-rose-50"
                         leftIcon={<XCircle className="w-3.5 h-3.5" />}
                         onClick={() => handleOpenReject(task)}
                       >
@@ -375,7 +417,7 @@ export const CoachTasksPage: React.FC = () => {
                         disabled={!!verifyingTaskId}
                         onClick={() => handleVerify(task.id)}
                       >
-                        Onayla
+                        Onayla (+XP)
                       </Button>
                     </>
                   )}
@@ -384,7 +426,7 @@ export const CoachTasksPage: React.FC = () => {
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="text-xs text-zinc-400 hover:text-rose-400"
+                      className="text-xs text-slate-400 hover:text-rose-600"
                       onClick={() => handleCancel(task.id)}
                     >
                       İptal Et
@@ -407,21 +449,25 @@ export const CoachTasksPage: React.FC = () => {
         >
           <form onSubmit={handleCreateTask} className="space-y-4">
             {feedback && (
-              <div className="p-3 rounded-md bg-emerald-950/40 border border-emerald-900/60 text-emerald-300 text-xs flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-                <span>{feedback}</span>
+              <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                <span className="font-semibold">{feedback}</span>
               </div>
             )}
 
             <div>
-              <label className="block text-xs font-medium text-zinc-300 mb-1.5">
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                 Danışan Öğrenci
               </label>
               <select
                 value={selectedStudentId}
                 onChange={(e) => setSelectedStudentId(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-md p-2.5 text-xs text-zinc-100 focus:outline-hidden focus:border-amber-500"
+                required
+                className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
               >
+                <option value="" disabled>
+                  Lütfen danışan öğrenci seçiniz...
+                </option>
                 {assignedStudents.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.first_name} {s.last_name} ({s.email})
@@ -439,7 +485,7 @@ export const CoachTasksPage: React.FC = () => {
             />
 
             <div>
-              <label className="block text-xs font-medium text-zinc-300 mb-1.5">
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                 Açıklama & Hedef Yönergeleri
               </label>
               <textarea
@@ -447,7 +493,7 @@ export const CoachTasksPage: React.FC = () => {
                 placeholder="Örn: Hız problemleri föyünü tamamla ve yapamadığın soruların video çözümlerini izle..."
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-md p-2.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:outline-hidden focus:border-amber-500"
+                className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
               />
             </div>
 
@@ -461,13 +507,13 @@ export const CoachTasksPage: React.FC = () => {
               />
 
               <div>
-                <label className="block text-xs font-medium text-zinc-300 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                   Ödül XP Değeri (10 - 150 XP)
                 </label>
                 <select
                   value={xpReward}
                   onChange={(e) => setXpReward(Number(e.target.value))}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-md p-2.5 text-xs text-zinc-100 focus:outline-hidden focus:border-amber-500"
+                  className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
                 >
                   <option value={25}>25 XP (Temel Görev)</option>
                   <option value={50}>50 XP (Standart Görev)</option>
@@ -478,7 +524,7 @@ export const CoachTasksPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
               <Button
                 variant="ghost"
                 size="sm"
@@ -513,14 +559,14 @@ export const CoachTasksPage: React.FC = () => {
           maxWidth="sm"
         >
           <form onSubmit={handleConfirmReject} className="space-y-4 text-xs">
-            <p className="text-zinc-300">
-              <strong className="text-zinc-100">{selectedTaskForReject.title}</strong> görevi reddedilecek ve öğrenciye geri bildirim iletilecektir.
+            <p className="text-slate-600">
+              <strong className="text-slate-900">{selectedTaskForReject.title}</strong> görevi reddedilecek ve öğrenciye geri bildirim iletilecektir.
               <br />
-              <span className="text-amber-400 font-medium">Bu işlem sonucunda öğrenciye XP verilmeyecektir.</span>
+              <span className="text-amber-700 font-medium">Bu işlem sonucunda öğrenciye XP verilmeyecektir.</span>
             </p>
 
             <div>
-              <label className="block text-zinc-300 font-medium mb-1.5">
+              <label className="block text-slate-700 font-semibold mb-1.5">
                 Revizyon Gerekçesi / Açıklama
               </label>
               <textarea
@@ -529,11 +575,11 @@ export const CoachTasksPage: React.FC = () => {
                 placeholder="Örn: Soruların çözümleri yüklenmemiş, lütfen çalışma kağıdını ekleyerek tekrar teslim edin..."
                 value={rejectionReason}
                 onChange={(e) => setRejectionReason(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-md p-2.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:outline-hidden focus:border-rose-500"
+                className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20"
               />
             </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
               <Button
                 variant="ghost"
                 size="sm"
@@ -547,10 +593,9 @@ export const CoachTasksPage: React.FC = () => {
                 Vazgeç
               </Button>
               <Button
-                variant="secondary"
+                variant="danger"
                 size="sm"
                 type="submit"
-                className="text-rose-400 border-rose-900/60 hover:bg-rose-950/60"
                 leftIcon={<XCircle className="w-3.5 h-3.5" />}
                 isLoading={rejecting}
                 disabled={rejecting || !rejectionReason.trim()}

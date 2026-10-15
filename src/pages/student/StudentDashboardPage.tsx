@@ -32,6 +32,7 @@ import {
   MessageSquare,
   Megaphone,
   CreditCard,
+  Camera,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -60,15 +61,18 @@ export const StudentDashboardPage: React.FC = () => {
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
   const loadStudentData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id && !profile?.id) return;
     try {
       setLoading(true);
+      const studentPrimaryId = profile?.id || user?.id || '';
+      const studentSecondaryId = user?.id !== profile?.id ? user?.id : undefined;
+
       const [xp, hw, exams, schedule, sub, annList] = await Promise.all([
-        xpService.getStudentXP(user.id).catch(() => null),
+        xpService.getStudentXP(studentPrimaryId, studentSecondaryId).catch(() => null),
         homeworkService.getHomeworks().catch(() => []),
-        examService.getStudentExamResults(user.id).catch(() => []),
+        examService.getStudentExamResults(studentPrimaryId, studentSecondaryId).catch(() => []),
         academicService.getMasterSchedule().catch(() => []),
-        subscriptionService.getUserSubscription(user.id).catch(() => null),
+        subscriptionService.getUserSubscription(studentPrimaryId).catch(() => null),
         announcementService.getAnnouncements('student').catch(() => []),
       ]);
 
@@ -87,10 +91,25 @@ export const StudentDashboardPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [user?.id, profile?.id]);
 
   useEffect(() => {
     loadStudentData();
+    const handleLiveSync = () => {
+      loadStudentData();
+    };
+    window.addEventListener('mahfaza:xp-updated', handleLiveSync);
+    window.addEventListener('mahfaza:package-upgraded', handleLiveSync);
+    window.addEventListener('mahfaza:exam-updated', handleLiveSync);
+    window.addEventListener('mahfaza:new_notification', handleLiveSync);
+    window.addEventListener('mahfaza:counts-updated', handleLiveSync);
+    return () => {
+      window.removeEventListener('mahfaza:xp-updated', handleLiveSync);
+      window.removeEventListener('mahfaza:package-upgraded', handleLiveSync);
+      window.removeEventListener('mahfaza:exam-updated', handleLiveSync);
+      window.removeEventListener('mahfaza:new_notification', handleLiveSync);
+      window.removeEventListener('mahfaza:counts-updated', handleLiveSync);
+    };
   }, [loadStudentData]);
 
   const levelInfo = xpData ? calculateLevel(xpData.lifetime_xp) : calculateLevel(0);
@@ -99,14 +118,15 @@ export const StudentDashboardPage: React.FC = () => {
 
   // Handle XP award action (Atomic RPC)
   const handleAwardAction = async () => {
-    if (!user?.id || !xpData) return;
+    const studentUid = profile?.id || user?.id;
+    if (!studentUid || !xpData) return;
     setSubmittingAction(true);
     setActionFeedback(null);
 
     const action = XP_EARNING_ACTIONS[selectedActionKey];
     try {
       const res = await xpService.awardXPAtomic({
-        student_id: user.id,
+        student_id: studentUid,
         base_amount: action.baseXP,
         action_type: selectedActionKey.toLowerCase(),
         description: `${action.label}${actionNotes ? ` - ${actionNotes}` : ''}`,
@@ -156,192 +176,211 @@ export const StudentDashboardPage: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Top Banner & Quick Action */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800/80">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200/80">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs font-mono text-amber-400 tracking-wider uppercase">Mahfaza.co Kumanda Masası</span>
+            <span className="text-xs font-semibold text-amber-600 tracking-wider uppercase">Mahfaza.co Kumanda Masası</span>
             <Link
               to="/pricing"
-              className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-300 hover:bg-amber-500/20 transition-colors inline-flex items-center gap-1"
+              className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 border border-amber-300 text-amber-900 hover:bg-amber-200 transition-colors inline-flex items-center gap-1"
             >
               <CreditCard className="w-3 h-3" />
               {subscription?.plan?.name || 'Başlangıç (Ücretsiz)'}
             </Link>
           </div>
-          <h1 className="text-xl sm:text-2xl font-bold text-zinc-100 tracking-tight mt-0.5">
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight mt-0.5">
             Hoş Geldin, {profile?.first_name ? `${profile.first_name} ${profile.last_name || ''}` : 'Talebe'}
           </h1>
-          <p className="text-xs text-zinc-400 mt-1">
+          <p className="text-xs text-slate-500 mt-1">
             "Planını Kur. Disiplinini Koru. Hedefine Ulaş."
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Button
-            variant="primary"
-            size="md"
-            leftIcon={<Play className="w-4 h-4" />}
-            onClick={() => setActionModalOpen(true)}
-          >
-            Seans Başlat / XP Kaydet
-          </Button>
+        <div className="flex items-center gap-2.5">
+          <Link to="/student/study-focus">
+            <Button
+              variant="secondary"
+              size="md"
+              className="bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100 font-semibold"
+              leftIcon={<Camera className="w-4 h-4 text-amber-600" />}
+            >
+              + Serbest Çalışma Kaydı Ekle
+            </Button>
+          </Link>
+          <Link to="/student/study-focus">
+            <Button
+              variant="primary"
+              size="md"
+              leftIcon={<Play className="w-4 h-4" />}
+            >
+              Odak Seansı Başlat
+            </Button>
+          </Link>
         </div>
       </div>
 
       {/* Announcements Bar (if any published announcements exist) */}
       {announcements.length > 0 && (
-        <div className="p-3.5 rounded-lg bg-zinc-900/90 border border-amber-500/30 flex items-start gap-3">
-          <Megaphone className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+        <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200/90 flex items-start gap-3 shadow-xs">
+          <Megaphone className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-zinc-100">{announcements[0].title}</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-400 font-mono">
+              <span className="text-xs font-bold text-slate-900">{announcements[0].title}</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold">
                 Duyuru
               </span>
             </div>
-            <p className="text-xs text-zinc-300 mt-0.5 line-clamp-2">{announcements[0].content}</p>
+            <p className="text-xs text-slate-700 mt-0.5 line-clamp-2">{announcements[0].content}</p>
           </div>
         </div>
       )}
 
-      {/* Quick Action Shortcuts (Section 4 & Section 10) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
+      {/* Quick Action Shortcuts */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
         <Link
-          to="/student/sessions"
-          className="flex flex-col items-center justify-center p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80 hover:border-amber-500/40 hover:bg-zinc-900 transition-all text-center group"
+          to="/student/study-logs"
+          className="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-white border border-slate-200/80 hover:border-amber-400 hover:shadow-md transition-all text-center group shadow-xs"
         >
-          <BookOpen className="w-5 h-5 text-amber-400 mb-1.5 group-hover:scale-110 transition-transform" />
-          <span className="text-xs font-medium text-zinc-200">Çalışma</span>
-          <span className="text-[10px] text-zinc-500">Seans Başlat</span>
+          <BookOpen className="w-5 h-5 text-amber-600 mb-1.5 group-hover:scale-110 transition-transform" />
+          <span className="text-xs font-semibold text-slate-800">Çalışma Kaydı</span>
+          <span className="text-[10px] text-slate-400">Kanıt & XP</span>
+        </Link>
+        <Link
+          to="/student/study-focus"
+          className="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-white border border-slate-200/80 hover:border-amber-400 hover:shadow-md transition-all text-center group shadow-xs"
+        >
+          <Clock className="w-5 h-5 text-amber-500 mb-1.5 group-hover:scale-110 transition-transform" />
+          <span className="text-xs font-semibold text-slate-800">Çalışma Odası</span>
+          <span className="text-[10px] text-slate-400">Pomodoro Sayaç</span>
         </Link>
         <Link
           to="/student/homework"
-          className="flex flex-col items-center justify-center p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80 hover:border-amber-500/40 hover:bg-zinc-900 transition-all text-center group"
+          className="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-white border border-slate-200/80 hover:border-sky-400 hover:shadow-md transition-all text-center group shadow-xs"
         >
-          <CheckSquare className="w-5 h-5 text-sky-400 mb-1.5 group-hover:scale-110 transition-transform" />
-          <span className="text-xs font-medium text-zinc-200">Görevlerim</span>
-          <span className="text-[10px] text-zinc-500">Ödev & Takip</span>
+          <CheckSquare className="w-5 h-5 text-sky-500 mb-1.5 group-hover:scale-110 transition-transform" />
+          <span className="text-xs font-semibold text-slate-800">Görevlerim</span>
+          <span className="text-[10px] text-slate-400">Ödev & Takip</span>
         </Link>
         <Link
           to="/student/learning"
-          className="flex flex-col items-center justify-center p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80 hover:border-amber-500/40 hover:bg-zinc-900 transition-all text-center group"
+          className="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-white border border-slate-200/80 hover:border-emerald-400 hover:shadow-md transition-all text-center group shadow-xs"
         >
-          <BookOpen className="w-5 h-5 text-emerald-400 mb-1.5 group-hover:scale-110 transition-transform" />
-          <span className="text-xs font-medium text-zinc-200">Derslerim</span>
-          <span className="text-[10px] text-zinc-500">İçerik & Notlar</span>
+          <BookOpen className="w-5 h-5 text-emerald-500 mb-1.5 group-hover:scale-110 transition-transform" />
+          <span className="text-xs font-semibold text-slate-800">Derslerim</span>
+          <span className="text-[10px] text-slate-400">İçerik & Notlar</span>
         </Link>
         <Link
           to="/messages"
-          className="flex flex-col items-center justify-center p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80 hover:border-amber-500/40 hover:bg-zinc-900 transition-all text-center group"
+          className="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-white border border-slate-200/80 hover:border-indigo-400 hover:shadow-md transition-all text-center group shadow-xs"
         >
-          <MessageSquare className="w-5 h-5 text-indigo-400 mb-1.5 group-hover:scale-110 transition-transform" />
-          <span className="text-xs font-medium text-zinc-200">Mesajlar</span>
-          <span className="text-[10px] text-zinc-500">Öğretmene Danış</span>
+          <MessageSquare className="w-5 h-5 text-indigo-500 mb-1.5 group-hover:scale-110 transition-transform" />
+          <span className="text-xs font-semibold text-slate-800">Mesajlar</span>
+          <span className="text-[10px] text-slate-400">Öğretmene Danış</span>
         </Link>
         <Link
           to="/student/exams"
-          className="flex flex-col items-center justify-center p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80 hover:border-amber-500/40 hover:bg-zinc-900 transition-all text-center group"
+          className="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-white border border-slate-200/80 hover:border-rose-400 hover:shadow-md transition-all text-center group shadow-xs"
         >
-          <Target className="w-5 h-5 text-rose-400 mb-1.5 group-hover:scale-110 transition-transform" />
-          <span className="text-xs font-medium text-zinc-200">Sınavlar</span>
-          <span className="text-[10px] text-zinc-500">Deneme Netleri</span>
+          <Target className="w-5 h-5 text-rose-500 mb-1.5 group-hover:scale-110 transition-transform" />
+          <span className="text-xs font-semibold text-slate-800">Sınavlar</span>
+          <span className="text-[10px] text-slate-400">Deneme Netleri</span>
         </Link>
         <Link
           to="/student/rewards"
-          className="flex flex-col items-center justify-center p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80 hover:border-amber-500/40 hover:bg-zinc-900 transition-all text-center group"
+          className="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-white border border-slate-200/80 hover:border-amber-400 hover:shadow-md transition-all text-center group shadow-xs"
         >
-          <Gift className="w-5 h-5 text-amber-400 mb-1.5 group-hover:scale-110 transition-transform" />
-          <span className="text-xs font-medium text-zinc-200">XP & Ödüller</span>
-          <span className="text-[10px] text-zinc-500">Vitrin & Harca</span>
+          <Gift className="w-5 h-5 text-amber-500 mb-1.5 group-hover:scale-110 transition-transform" />
+          <span className="text-xs font-semibold text-slate-800">XP & Ödüller</span>
+          <span className="text-[10px] text-slate-400">Vitrin & Harca</span>
         </Link>
         <Link
           to="/profile"
-          className="flex flex-col items-center justify-center p-3 rounded-lg bg-zinc-900/60 border border-zinc-800/80 hover:border-amber-500/40 hover:bg-zinc-900 transition-all text-center group"
+          className="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-white border border-slate-200/80 hover:border-slate-400 hover:shadow-md transition-all text-center group shadow-xs"
         >
-          <User className="w-5 h-5 text-zinc-400 mb-1.5 group-hover:scale-110 transition-transform" />
-          <span className="text-xs font-medium text-zinc-200">Profilim</span>
-          <span className="text-[10px] text-zinc-500">Hesap Detayı</span>
+          <User className="w-5 h-5 text-slate-500 mb-1.5 group-hover:scale-110 transition-transform" />
+          <span className="text-xs font-semibold text-slate-800">Profilim</span>
+          <span className="text-[10px] text-slate-400">Hesap Detayı</span>
         </Link>
       </div>
 
-      {/* Top-Level Metrics Grid (Section 32) */}
+      {/* Top-Level Metrics Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 sm:gap-4">
         {/* Metric 1: Lifetime XP */}
-        <div className="bg-zinc-900/80 border border-zinc-800 rounded-lg p-4">
-          <div className="flex items-center justify-between text-zinc-400 mb-1">
-            <span className="text-[11px] font-medium uppercase tracking-wider">Ömür Boyu XP</span>
-            <Award className="w-4 h-4 text-amber-400/80" />
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center justify-between text-slate-500 mb-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wider">Ömür Boyu XP</span>
+            <Award className="w-4 h-4 text-amber-500" />
           </div>
-          <div className="text-xl sm:text-2xl font-bold font-mono text-zinc-100 tabular-nums">
+          <div className="text-xl sm:text-2xl font-black font-mono text-slate-900 tabular-nums">
             {xpData?.lifetime_xp || 0}
           </div>
-          <span className="text-[10px] text-zinc-500 mt-1 block">Asla eksilmez</span>
+          <span className="text-[10px] text-slate-400 mt-1 block font-medium">Asla eksilmez</span>
         </div>
 
         {/* Metric 2: Wallet XP */}
-        <div className="bg-zinc-900/80 border border-zinc-800 rounded-lg p-4">
-          <div className="flex items-center justify-between text-zinc-400 mb-1">
-            <span className="text-[11px] font-medium uppercase tracking-wider">Cüzdan XP</span>
-            <Coins className="w-4 h-4 text-amber-400" />
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center justify-between text-slate-500 mb-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wider">Cüzdan XP</span>
+            <Coins className="w-4 h-4 text-amber-500" />
           </div>
-          <div className="text-xl sm:text-2xl font-bold font-mono text-amber-400 tabular-nums">
+          <div className="text-xl sm:text-2xl font-black font-mono text-amber-600 tabular-nums">
             {xpData?.wallet_xp || 0}
           </div>
-          <span className="text-[10px] text-zinc-500 mt-1 block">Ödül mağazasında harcanır</span>
+          <span className="text-[10px] text-slate-400 mt-1 block font-medium">Ödül mağazasında harcanır</span>
         </div>
 
         {/* Metric 3: Level */}
-        <div className="bg-zinc-900/80 border border-zinc-800 rounded-lg p-4">
-          <div className="flex items-center justify-between text-zinc-400 mb-1">
-            <span className="text-[11px] font-medium uppercase tracking-wider">Akademik Rütbe</span>
-            <span className="text-[11px] font-mono text-amber-400">Lv.{levelInfo.level}</span>
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center justify-between text-slate-500 mb-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wider">Rütbe</span>
+            <span className="text-[11px] font-mono font-bold text-amber-600">Lv.{levelInfo.level}</span>
           </div>
-          <div className="text-base sm:text-lg font-bold text-zinc-100 truncate">
+          <div className="text-sm sm:text-base font-bold text-slate-900 truncate">
             {levelInfo.title}
           </div>
-          <div className="w-full bg-zinc-800 h-1.5 rounded-full mt-2 overflow-hidden">
+          <div className="w-full bg-slate-100 h-1.5 rounded-full mt-2 overflow-hidden">
             <div
-              className="bg-amber-400 h-full rounded-full transition-all duration-300"
+              className="bg-amber-500 h-full rounded-full transition-all duration-300"
               style={{ width: `${levelInfo.progressPercent}%` }}
             />
           </div>
         </div>
 
         {/* Metric 4: Streak */}
-        <div className="bg-zinc-900/80 border border-zinc-800 rounded-lg p-4">
-          <div className="flex items-center justify-between text-zinc-400 mb-1">
-            <span className="text-[11px] font-medium uppercase tracking-wider">Disiplin Serisi</span>
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center justify-between text-slate-500 mb-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wider">Disiplin Serisi</span>
             <Flame className="w-4 h-4 text-amber-500 fill-amber-500/20" />
           </div>
-          <div className="text-xl sm:text-2xl font-bold font-mono text-zinc-100 tabular-nums">
-            {xpData?.current_streak_days || 0} <span className="text-xs font-normal text-zinc-400">Gün</span>
+          <div className="text-xl sm:text-2xl font-black font-mono text-slate-900 tabular-nums">
+            {xpData?.current_streak_days || 0} <span className="text-xs font-normal text-slate-400">Gün</span>
           </div>
-          <span className="text-[10px] text-amber-400/80 mt-1 block">
+          <span className="text-[10px] text-amber-700 font-semibold mt-1 block">
             {(xpData?.current_streak_days || 0) >= 3 ? 'Aktif XP Çarpanı Devrede' : '3 günde 1.05x çarpan'}
           </span>
         </div>
 
         {/* Metric 5: Today Earned */}
-        <div className="bg-zinc-900/80 border border-zinc-800 rounded-lg p-4">
-          <div className="flex items-center justify-between text-zinc-400 mb-1">
-            <span className="text-[11px] font-medium uppercase tracking-wider">Bugünkü XP</span>
-            <Zap className="w-4 h-4 text-emerald-400" />
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center justify-between text-slate-500 mb-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wider">Bugünkü XP</span>
+            <Zap className="w-4 h-4 text-emerald-500" />
           </div>
-          <div className="text-xl sm:text-2xl font-bold font-mono text-emerald-400 tabular-nums">
-            {todayEarned} <span className="text-xs font-normal text-zinc-500">/ 150 XP</span>
+          <div className="text-xl sm:text-2xl font-black font-mono text-emerald-600 tabular-nums">
+            {todayEarned} <span className="text-xs font-normal text-slate-400">/ 150</span>
           </div>
-          <span className="text-[10px] text-zinc-500 mt-1 block">Azami: 150 XP/gün</span>
+          <span className="text-[10px] text-slate-400 mt-1 block font-medium">Günlük kota sınırı</span>
         </div>
 
         {/* Metric 6: Today Remaining */}
-        <div className="bg-zinc-900/80 border border-zinc-800 rounded-lg p-4">
-          <div className="flex items-center justify-between text-zinc-400 mb-1">
-            <span className="text-[11px] font-medium uppercase tracking-wider">Kalan Günlük Kota</span>
-            <Clock className="w-4 h-4 text-zinc-400" />
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all">
+          <div className="flex items-center justify-between text-slate-500 mb-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wider">Kalan Kota</span>
+            <Clock className="w-4 h-4 text-sky-500" />
           </div>
-          <div className="text-xl sm:text-2xl font-bold font-mono text-zinc-200 tabular-nums">
-            {todayRemaining} <span className="text-xs font-normal text-zinc-500">XP</span>
+          <div className="text-xl sm:text-2xl font-black font-mono text-sky-600 tabular-nums">
+            {todayRemaining} XP
           </div>
-          <span className="text-[10px] text-zinc-500 mt-1 block">Bugün kazanılabilecek maksimum XP: {todayRemaining}</span>
+          <span className="text-[10px] text-slate-400 mt-1 block font-medium">Bugünlük hak</span>
         </div>
       </div>
 
@@ -357,21 +396,21 @@ export const StudentDashboardPage: React.FC = () => {
             <EmptyState
               title="Bugün Ders Bulunmuyor"
               description="Bugün için tanımlı bir ders seansı bulunmuyor. Bireysel çalışma seansı başlatabilirsiniz."
-              icon={<Calendar className="w-6 h-6 text-zinc-500" />}
+              icon={<Calendar className="w-6 h-6 text-slate-400" />}
             />
           ) : (
-            <div className="divide-y divide-zinc-800/80">
+            <div className="divide-y divide-slate-200/80">
               {todaySchedule.map((item) => (
                 <div key={item.id} className="py-3 flex items-center justify-between">
                   <div>
-                    <div className="text-xs font-semibold text-zinc-200">{item.subject_name || 'Ders'}</div>
-                    <div className="text-[11px] text-zinc-500 mt-0.5">
+                    <div className="text-xs font-semibold text-slate-800">{item.subject_name || 'Ders'}</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
                       Öğretmen: {item.teacher_name || 'Atanmamış'}
                     </div>
                   </div>
                   <div className="text-right">
-                    <span className="text-xs font-mono font-medium text-amber-400">{item.period}. Ders</span>
-                    {item.room && <div className="text-[10px] text-zinc-500">Derslik: {item.room}</div>}
+                    <span className="text-xs font-mono font-medium text-amber-700">{item.period}. Ders</span>
+                    {item.room && <div className="text-[10px] text-slate-500">Derslik: {item.room}</div>}
                   </div>
                 </div>
               ))}
@@ -379,17 +418,36 @@ export const StudentDashboardPage: React.FC = () => {
           )}
         </Card>
 
-        {/* Academic Analytics Chart */}
+        {/* Academic Analytics Chart (Tier-Aware) */}
         <Card
           title="Akademik Net Gelişimi"
-          subtitle="Sınav sonuçlarına göre toplam net trendi"
+          subtitle="Sınav sonuçlarına göre toplam net trendi ve gelişim analizi"
           className="lg:col-span-2"
         >
-          {examResults.length === 0 ? (
+          {(subscription?.plan_id || 'free') === 'free' ? (
+            <div className="p-6 rounded-2xl bg-amber-50/70 border border-amber-200 text-center space-y-3">
+              <div className="w-11 h-11 rounded-full bg-amber-100 border border-amber-300 text-amber-700 flex items-center justify-center mx-auto">
+                <Target className="w-5 h-5" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-900">
+                Gelişmiş Net Trend Grafiği & Sınav Analizi (Standart / Pro / VIP)
+              </h3>
+              <p className="text-xs text-slate-600 max-w-md mx-auto leading-relaxed">
+                Şu anda <strong>Başlangıç (Ücretsiz)</strong> paketindesiniz. TYT/AYT/LGS deneme net grafiklerini ve ders bazlı gelişim analizlerini açmak için paketinizi yükseltin veya koçunuzdan paket yükseltmesi talep edin.
+              </p>
+              <div className="pt-1 flex justify-center gap-2">
+                <Link to="/pricing">
+                  <Button variant="primary" size="sm">
+                    Paketleri İncele & Yükselt
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          ) : examResults.length === 0 ? (
             <EmptyState
               title="Henüz Sınav Verisi Yok"
               description="Girilen TYT, AYT veya LGS deneme sonuçları kaydedildikçe gelişim grafiğiniz burada görselleştirilecektir."
-              icon={<Target className="w-6 h-6 text-zinc-500" />}
+              icon={<Target className="w-6 h-6 text-slate-400" />}
             />
           ) : (
             <div className="h-64 w-full">
@@ -397,18 +455,18 @@ export const StudentDashboardPage: React.FC = () => {
                 <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="netGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#d97706" stopOpacity={0.4} />
+                      <stop offset="5%" stopColor="#d97706" stopOpacity={0.35} />
                       <stop offset="95%" stopColor="#d97706" stopOpacity={0.0} />
                     </linearGradient>
                   </defs>
-                  <XAxis dataKey="name" stroke="#52525b" fontSize={11} tickLine={false} />
-                  <YAxis stroke="#52525b" fontSize={11} tickLine={false} />
+                  <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
+                  <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: '#18181b',
-                      borderColor: '#27272a',
-                      borderRadius: '0.375rem',
-                      color: '#f4f4f5',
+                      backgroundColor: '#ffffff',
+                      borderColor: '#e2e8f0',
+                      borderRadius: '0.75rem',
+                      color: '#0f172a',
                       fontSize: '12px',
                     }}
                   />
@@ -439,16 +497,16 @@ export const StudentDashboardPage: React.FC = () => {
             <EmptyState
               title="Aktif Ödev Yok"
               description="Şu an için teslimi bekleyen bir ödeviniz bulunmuyor."
-              icon={<BookOpen className="w-6 h-6 text-zinc-500" />}
+              icon={<BookOpen className="w-6 h-6 text-slate-400" />}
             />
           ) : (
-            <div className="divide-y divide-zinc-800/80">
+            <div className="divide-y divide-slate-200/80">
               {homeworks.map((hw) => (
                 <div key={hw.id} className="py-3 flex items-start justify-between gap-3">
                   <div>
-                    <h4 className="text-xs font-semibold text-zinc-200">{hw.title}</h4>
-                    <p className="text-[11px] text-zinc-400 mt-0.5 line-clamp-1">{hw.description}</p>
-                    <div className="flex items-center gap-2 text-[10px] text-zinc-500 mt-1">
+                    <h4 className="text-xs font-semibold text-slate-800">{hw.title}</h4>
+                    <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">{hw.description}</p>
+                    <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-1">
                       <span>Ders: {hw.subject_name || 'Genel'}</span>
                       <span aria-hidden="true">·</span>
                       <span>Son Teslim: {new Date(hw.due_at).toLocaleDateString('tr-TR')}</span>
@@ -470,33 +528,51 @@ export const StudentDashboardPage: React.FC = () => {
             <EmptyState
               title="Sınav Kaydı Yok"
               description="Öğretmeniniz veya koçunuz tarafından girilen sınav sonuçları burada listelenir."
-              icon={<Target className="w-6 h-6 text-zinc-500" />}
+              icon={<Target className="w-6 h-6 text-slate-400" />}
             />
           ) : (
-            <div className="divide-y divide-zinc-800/80">
+            <div className="divide-y divide-slate-200/80">
               {examResults.map((res) => (
                 <div key={res.id} className="py-3 flex items-center justify-between">
                   <div>
-                    <h4 className="text-xs font-semibold text-zinc-200">
+                    <h4 className="text-xs font-bold text-gray-800">
                       {res.exam?.title || 'Deneme Sınavı'}
                     </h4>
-                    <div className="flex items-center gap-2 text-[10px] text-zinc-400 mt-0.5">
-                      <span>Tür: {res.exam?.exam_type || 'TYT'}</span>
-                      <span aria-hidden="true">·</span>
-                      <span>Türkçe: {res.turkish_net}</span>
-                      <span aria-hidden="true">·</span>
-                      <span>Mat: {res.math_net}</span>
-                      <span aria-hidden="true">·</span>
-                      <span>Fen: {res.science_net}</span>
-                      <span aria-hidden="true">·</span>
-                      <span>Sos: {res.social_net}</span>
+                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-gray-600 mt-1">
+                      <span className="font-bold text-amber-900 bg-amber-50 px-1.5 py-0.5 rounded font-mono border border-amber-200">
+                        {res.exam?.exam_type || res.exam_type || 'TYT'}
+                      </span>
+                      {res.branches && res.branches.length > 0 ? (
+                        res.branches.map((b, bi) => (
+                          <span
+                            key={bi}
+                            className={`px-1.5 py-0.2 rounded font-mono text-[10px] ${
+                              (Number(b.net) || 0) <= 2
+                                ? 'bg-rose-50 text-rose-700 border border-rose-200 font-bold'
+                                : 'bg-slate-50 text-slate-700 border border-slate-200'
+                            }`}
+                          >
+                            {b.name}: <strong>{b.net}N</strong>
+                          </span>
+                        ))
+                      ) : (
+                        <>
+                          <span>Türkçe: {res.turkish_net}</span>
+                          <span aria-hidden="true">·</span>
+                          <span>Mat: {res.math_net}</span>
+                          <span aria-hidden="true">·</span>
+                          <span>Fen: {res.science_net}</span>
+                          <span aria-hidden="true">·</span>
+                          <span>Sos: {res.social_net}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="text-right">
-                    <span className="text-xs font-mono font-bold text-amber-400">
+                    <span className="text-xs font-mono font-bold text-amber-700">
                       {res.total_net} Net
                     </span>
-                    <div className="text-[10px] font-mono text-zinc-500">
+                    <div className="text-[10px] font-mono text-gray-600">
                       {res.score} Puan
                     </div>
                   </div>
@@ -517,7 +593,7 @@ export const StudentDashboardPage: React.FC = () => {
       >
         <div className="space-y-4 text-xs">
           <div>
-            <label className="block text-zinc-400 mb-1.5 font-medium">Aktivite Türü</label>
+            <label className="block text-gray-600 mb-1.5 font-semibold">Aktivite Türü</label>
             <div className="grid grid-cols-2 gap-2">
               {Object.entries(XP_EARNING_ACTIONS).map(([key, item]) => {
                 const isSelected = selectedActionKey === key;
@@ -526,14 +602,14 @@ export const StudentDashboardPage: React.FC = () => {
                     key={key}
                     type="button"
                     onClick={() => setSelectedActionKey(key as keyof typeof XP_EARNING_ACTIONS)}
-                    className={`p-2.5 rounded border text-left transition-colors cursor-pointer ${
+                    className={`p-2.5 rounded-xl border text-left transition-colors cursor-pointer ${
                       isSelected
-                        ? 'border-amber-500/80 bg-amber-500/10 text-amber-200'
-                        : 'border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:border-zinc-700'
+                        ? 'border-amber-500 bg-amber-50 text-amber-900'
+                        : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
                     }`}
                   >
-                    <div className="font-semibold text-zinc-200">{item.label}</div>
-                    <div className="text-[11px] text-amber-400/90 font-mono mt-0.5">+{item.baseXP} Taban XP</div>
+                    <div className="font-bold text-gray-800">{item.label}</div>
+                    <div className="text-[11px] text-amber-700 font-mono mt-0.5">+{item.baseXP} Taban XP</div>
                   </button>
                 );
               })}
@@ -541,36 +617,36 @@ export const StudentDashboardPage: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-zinc-400 mb-1.5 font-medium">Çalışma Konusu / Notu (İsteğe Bağlı)</label>
+            <label className="block text-gray-600 mb-1.5 font-semibold">Çalışma Konusu / Notu (İsteğe Bağlı)</label>
             <input
               type="text"
               placeholder="Örn: Limit & Süreklilik soru çözümü"
               value={actionNotes}
               onChange={(e) => setActionNotes(e.target.value)}
-              className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
+              className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-amber-500"
             />
           </div>
 
-          {/* Real-time preview calculation according to Section 21 & 23 */}
+          {/* Real-time preview calculation */}
           {currentPreview && (
-            <div className="p-3 rounded bg-zinc-950/80 border border-zinc-800/80 space-y-1.5 font-mono text-[11px]">
-              <div className="flex justify-between text-zinc-400">
+            <div className="p-3 rounded-xl bg-slate-50 border border-gray-200 space-y-1.5 font-mono text-[11px]">
+              <div className="flex justify-between text-gray-600">
                 <span>Taban Değer:</span>
                 <span>{XP_EARNING_ACTIONS[selectedActionKey].baseXP} XP</span>
               </div>
-              <div className="flex justify-between text-zinc-400">
+              <div className="flex justify-between text-gray-600">
                 <span>Disiplin Çarpanı ({xpData?.current_streak_days || 0}. gün):</span>
-                <span className="text-amber-400">{currentPreview.multiplier}x</span>
+                <span className="text-amber-700 font-bold">{currentPreview.multiplier}x</span>
               </div>
-              <div className="flex justify-between text-zinc-400">
+              <div className="flex justify-between text-gray-600">
                 <span>Hesaplanan:</span>
                 <span>{currentPreview.calculatedXP} XP</span>
               </div>
-              <div className="flex justify-between text-zinc-400">
+              <div className="flex justify-between text-gray-600">
                 <span>Kalan Günlük Kota:</span>
                 <span>{todayRemaining} / 150 XP</span>
               </div>
-              <div className="border-t border-zinc-800 pt-1.5 flex justify-between font-bold text-emerald-400">
+              <div className="border-t border-gray-200 pt-1.5 flex justify-between font-bold text-emerald-700">
                 <span>Kazanılacak Net XP:</span>
                 <span>+{currentPreview.finalAwardable} XP</span>
               </div>
@@ -578,7 +654,7 @@ export const StudentDashboardPage: React.FC = () => {
           )}
 
           {actionFeedback && (
-            <div className="p-2.5 rounded bg-zinc-950 border border-zinc-800 text-center font-medium text-amber-400">
+            <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-center font-semibold text-amber-800">
               {actionFeedback}
             </div>
           )}

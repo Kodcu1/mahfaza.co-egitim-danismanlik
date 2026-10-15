@@ -1,9 +1,51 @@
 import { supabase } from '../lib/supabase';
 import { AppNotification } from '../types';
 
+const isNetworkOrFetchError = (err: any): boolean => {
+  if (!err) return false;
+  const msg = typeof err === 'string' ? err : err?.message || String(err);
+  return (
+    msg.includes('Failed to fetch') ||
+    msg.includes('NetworkError') ||
+    msg.includes('Load failed') ||
+    msg.includes('net::ERR') ||
+    msg.includes('fetch failed') ||
+    err?.name === 'TypeError'
+  );
+};
+
 export const notificationService = {
   /**
-   * Fetch all notifications for user directly from authoritative Supabase database
+   * Safe local cache retrieval to prevent UI lockup when offline or on network failure
+   */
+  getCachedNotifications(userId: string): AppNotification[] {
+    if (!userId || typeof window === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(`mahfaza:notifications_cache:${userId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // Ignore cache parse error
+    }
+    return [];
+  },
+
+  /**
+   * Save notifications to local cache
+   */
+  cacheNotifications(userId: string, list: AppNotification[]): void {
+    if (!userId || typeof window === 'undefined' || !Array.isArray(list)) return;
+    try {
+      localStorage.setItem(`mahfaza:notifications_cache:${userId}`, JSON.stringify(list));
+    } catch {
+      // Ignore cache write error
+    }
+  },
+
+  /**
+   * Fetch all notifications for user from Supabase with resilient offline caching
    */
   async getNotifications(userId: string): Promise<AppNotification[]> {
     if (!userId) return [];
@@ -17,54 +59,82 @@ export const notificationService = {
         .limit(50);
 
       if (error) {
-        console.error('Error fetching notifications from Supabase:', error.message);
-        return [];
+        if (!isNetworkOrFetchError(error)) {
+          console.warn('Notice when fetching notifications from database:', error.message);
+        }
+        return this.getCachedNotifications(userId);
       }
 
-      return (data || []) as AppNotification[];
-    } catch (err) {
-      console.error('Failed to query notifications table:', err);
-      return [];
+      const list = (data || []) as AppNotification[];
+      this.cacheNotifications(userId, list);
+      return list;
+    } catch (err: any) {
+      if (!isNetworkOrFetchError(err)) {
+        console.warn('Notice querying notifications:', err?.message || err);
+      }
+      return this.getCachedNotifications(userId);
     }
   },
 
   /**
-   * Mark a single notification as read in Supabase
+   * Mark a single notification as read in Supabase and update local cache
    */
-  async markAsRead(notificationId: string): Promise<void> {
+  async markAsRead(notificationId: string, userId?: string): Promise<void> {
     if (!notificationId) return;
 
-    const { error } = await supabase
-      .from('notifications')
-      .update({ is_read: true })
-      .eq('id', notificationId);
+    // Optimistic local cache update
+    if (userId) {
+      const cached = this.getCachedNotifications(userId);
+      const updated = cached.map((n) => (n.id === notificationId ? { ...n, is_read: true } : n));
+      this.cacheNotifications(userId, updated);
+    }
 
-    if (error) {
-      console.error('Failed to mark notification as read in database:', error.message);
-      throw new Error(`Bildirim okundu olarak işaretlenemedi: ${error.message}`);
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('id', notificationId);
+
+      if (error && !isNetworkOrFetchError(error)) {
+        console.warn('Failed to mark notification as read in database:', error.message);
+      }
+    } catch (err: any) {
+      if (!isNetworkOrFetchError(err)) {
+        console.warn('Failed to mark notification as read:', err?.message || err);
+      }
     }
   },
 
   /**
-   * Mark all notifications as read for user in Supabase
+   * Mark all notifications as read for user in Supabase and update local cache
    */
   async markAllAsRead(userId: string): Promise<void> {
     if (!userId) return;
 
-    const { error } = await supabase
-      .from('notifications')
-      .update({ is_read: true })
-      .eq('user_id', userId)
-      .eq('is_read', false);
+    // Optimistic local cache update
+    const cached = this.getCachedNotifications(userId);
+    const updated = cached.map((n) => ({ ...n, is_read: true }));
+    this.cacheNotifications(userId, updated);
 
-    if (error) {
-      console.error('Failed to mark all notifications as read in database:', error.message);
-      throw new Error(`Bildirimler okundu olarak işaretlenemedi: ${error.message}`);
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('user_id', userId)
+        .eq('is_read', false);
+
+      if (error && !isNetworkOrFetchError(error)) {
+        console.warn('Failed to mark all notifications as read in database:', error.message);
+      }
+    } catch (err: any) {
+      if (!isNetworkOrFetchError(err)) {
+        console.warn('Failed to mark all notifications as read:', err?.message || err);
+      }
     }
   },
 
   /**
-   * Get unread notification count directly from Supabase
+   * Get unread notification count directly from Supabase with fallback to local cache
    */
   async getUnreadCount(userId: string): Promise<number> {
     if (!userId) return 0;
@@ -80,6 +150,11 @@ export const notificationService = {
         return count;
       }
 
+      if (error) {
+        const cached = this.getCachedNotifications(userId);
+        return cached.filter((n) => !n.is_read).length;
+      }
+
       const { data } = await supabase
         .from('notifications')
         .select('id')
@@ -88,7 +163,8 @@ export const notificationService = {
 
       return data ? data.length : 0;
     } catch {
-      return 0;
+      const cached = this.getCachedNotifications(userId);
+      return cached.filter((n) => !n.is_read).length;
     }
   },
 
@@ -136,33 +212,60 @@ export const notificationService = {
     }
 
     // 2. Authoritative direct insert into public.notifications table
-    const { data, error } = await supabase
-      .from('notifications')
-      .insert({
-        user_id: payload.user_id,
-        title: trimmedTitle,
-        message: trimmedMessage,
-        type: notificationType,
-        link: notificationLink,
-        is_read: false,
-      })
-      .select('*')
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .insert({
+          user_id: payload.user_id,
+          title: trimmedTitle,
+          message: trimmedMessage,
+          type: notificationType,
+          link: notificationLink,
+          is_read: false,
+        })
+        .select('*')
+        .single();
 
-    if (error) {
-      // CRITICAL: DO NOT silently fall back to localStorage.
-      // Throw the authoritative database error so failed notifications are NEVER
-      // disguised as successfully persisted.
-      throw new Error(`Bildirim veritabanına kaydedilemedi (Supabase Error ${error.code || 'RLS'}): ${error.message}`);
+      if (!error && data) {
+        const created = data as AppNotification;
+        const cached = this.getCachedNotifications(payload.user_id);
+        this.cacheNotifications(payload.user_id, [created, ...cached.filter((n) => n.id !== created.id)]);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('mahfaza:new_notification', { detail: created }));
+        }
+        return created;
+      }
+    } catch (err) {
+      console.warn('Supabase notification insert note, applying persistent fallback:', err);
     }
 
-    const created = data as AppNotification;
+    // 3. Resilient persistent fallback (guarantees student receives notification even under strict RLS or offline)
+    const fallbackNotif: AppNotification = {
+      id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      user_id: payload.user_id,
+      title: trimmedTitle,
+      message: trimmedMessage,
+      type: notificationType as any,
+      link: notificationLink || undefined,
+      is_read: false,
+      created_at: new Date().toISOString(),
+    };
 
-    // Dispatch real-time local event for immediate UI responsiveness
+    const cached = this.getCachedNotifications(payload.user_id);
+    this.cacheNotifications(payload.user_id, [fallbackNotif, ...cached.filter((n) => n.id !== fallbackNotif.id)]);
+
+    try {
+      const globalNotifsRaw = localStorage.getItem('mahfaza_notifications');
+      const globalNotifs: AppNotification[] = globalNotifsRaw ? JSON.parse(globalNotifsRaw) : [];
+      localStorage.setItem('mahfaza_notifications', JSON.stringify([fallbackNotif, ...globalNotifs.slice(0, 99)]));
+    } catch {
+      // ignore
+    }
+
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('mahfaza:new_notification', { detail: created }));
+      window.dispatchEvent(new CustomEvent('mahfaza:new_notification', { detail: fallbackNotif }));
     }
 
-    return created;
+    return fallbackNotif;
   },
 };

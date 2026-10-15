@@ -30,6 +30,16 @@ export interface Profile {
   bio?: string | null;
   school_name?: string | null;
   grade_level?: number | null;
+  target_program?: string | null;
+  target_university?: string | null;
+  package?: string | null;
+  package_tier?: string | null;
+  subscription_plan?: string | null;
+  subscription_tier?: string | null;
+  xp?: number;
+  total_xp?: number;
+  wallet_xp?: number;
+  lifetime_xp?: number;
   created_at: string;
   updated_at: string;
 }
@@ -140,6 +150,7 @@ export interface BranchResult {
   wrong: number;
   empty: number;
   net: number;
+  maxQuestions?: number;
 }
 
 export interface ExamResult {
@@ -227,6 +238,8 @@ export interface RewardRequest {
   cost_xp?: number;
   status: RewardRequestStatus;
   coach_notes?: string | null;
+  student_note?: string | null;
+  created_at?: string;
   requested_at: string;
   reviewed_at?: string | null;
   reviewed_by?: string | null;
@@ -338,6 +351,8 @@ export interface SubscriptionPlan {
   category: SubscriptionCategory;
   monthly_price: number;
   yearly_price: number;
+  price_monthly?: number;
+  price_yearly?: number;
   student_capacity?: number | null;
   features: string[];
   limits: {
@@ -460,6 +475,7 @@ export interface CoachTask {
   created_at: string;
   updated_at: string;
   student?: Profile;
+  coach?: Profile | { id: string; full_name?: string; email?: string };
 }
 
 export interface CoachParentMeeting {
@@ -491,9 +507,28 @@ export interface CoachParentMeeting {
   updated_at: string;
   student?: Profile;
   parent?: Profile;
+  coach_name?: string | null;
+  branch_evaluations?: any[];
 }
+export type StudyProofStatus = 'pending' | 'approved' | 'rejected';
 
-
-
-
+export interface StudyProof {
+  id: string;
+  student_id: string;
+  coach_id?: string | null;
+  subject_id: string;
+  subject_name: string;
+  study_type?: string | null;
+  duration_minutes: number;
+  question_count: number;
+  study_note?: string | null;
+  proof_photo_url: string;
+  calculated_xp: number;
+  status: StudyProofStatus;
+  coach_feedback?: string | null;
+  created_at: string;
+  reviewed_at?: string | null;
+  student?: Profile;
+  coach?: Profile;
+}
 

@@ -4,6 +4,7 @@ import { useAuth } from '../../features/auth/AuthContext';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Mail, ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react';
+import { MahfazaLogo } from '../../utils/logoConstants';
 
 export const ForgotPasswordPage: React.FC = () => {
   const { resetPasswordForEmail } = useAuth();
@@ -36,9 +37,9 @@ export const ForgotPasswordPage: React.FC = () => {
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
 
       {/* Brand Header */}
-      <div className="text-center mb-8 relative z-10">
-        <Link to="/auth/login" className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-amber-500/10 border border-amber-500/30 mb-4 shadow-sm">
-          <span className="font-serif font-bold text-amber-400 text-xl tracking-widest">M</span>
+      <div className="text-center mb-8 relative z-10 flex flex-col items-center">
+        <Link to="/auth/login" className="inline-flex items-center justify-center mb-4">
+          <MahfazaLogo size="lg" />
         </Link>
         <h1 className="font-serif text-2xl font-bold tracking-wider text-zinc-100 uppercase">
           MAHFAZA<span className="text-amber-400 font-mono text-lg">.CO</span>

@@ -34,13 +34,13 @@ export const AdminRewardsPage: React.FC = () => {
     try {
       setLoading(true);
       const [rws, reqs] = await Promise.all([
-        rewardService.getAllRewardsAdmin(),
-        rewardService.getAllRequestsAdmin(),
+        rewardService.getAllRewardsAdmin().catch(() => []),
+        rewardService.getAllRequestsAdmin().catch(() => []),
       ]);
       setRewards(rws);
       setRequests(reqs);
     } catch (err) {
-      console.error('Error loading rewards data:', err);
+      console.warn('Rewards data loaded with fallback:', err);
     } finally {
       setLoading(false);
     }
@@ -111,13 +111,15 @@ export const AdminRewardsPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-zinc-800">
         <div>
-          <span className="text-xs font-mono text-amber-400 uppercase tracking-wider">Ödül Envanteri & Onay</span>
-          <h1 className="text-xl sm:text-2xl font-bold text-zinc-100 tracking-tight mt-0.5">
+          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 text-slate-900 dark:text-amber-200 text-xs font-bold uppercase tracking-wider mb-1.5">
+            Ödül Envanteri & Onay
+          </div>
+          <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-slate-100 tracking-tight mt-0.5">
             Ödüller & Talep Masası
           </h1>
-          <p className="text-xs text-zinc-400 mt-1">
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 font-medium">
             Mahfaza ödül vitrinini düzenleyin ve öğrenci taleplerini atomik olarak işleyin.
           </p>
         </div>

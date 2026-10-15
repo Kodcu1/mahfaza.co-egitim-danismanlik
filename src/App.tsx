@@ -16,6 +16,7 @@ import { StudentExamsPage } from './pages/student/StudentExamsPage';
 import { StudentRewardsPage } from './pages/student/StudentRewardsPage';
 import { StudentXPHistoryPage } from './pages/student/StudentXPHistoryPage';
 import { StudentLearningPage } from './pages/student/StudentLearningPage';
+import { StudentStudyLogsPage } from './pages/student/StudentStudyLogsPage';
 
 // Admin Pages
 import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
@@ -27,6 +28,10 @@ import { AdminContentPage } from './pages/admin/AdminContentPage';
 import { AdminAnnouncementsPage } from './pages/admin/AdminAnnouncementsPage';
 import { AdminSubscriptionsPage } from './pages/admin/AdminSubscriptionsPage';
 import { AdminApplicationsPage } from './pages/admin/AdminApplicationsPage';
+import { AdminAttendancePage } from './pages/admin/AdminAttendancePage';
+import { AdminTimetablePage } from './pages/admin/AdminTimetablePage';
+import { AdminTeachersPage } from './pages/admin/AdminTeachersPage';
+import { AdminExamsPage } from './pages/admin/AdminExamsPage';
 
 // Shared Production Pages
 import { PricingPage } from './pages/pricing/PricingPage';
@@ -62,7 +67,7 @@ const RootRedirect: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-xs text-zinc-500 font-mono">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center text-xs text-slate-500 font-mono">
         Mahfaza.co yükleniyor...
       </div>
     );
@@ -70,6 +75,10 @@ const RootRedirect: React.FC = () => {
 
   if (!user) {
     return <Navigate to="/auth/login" replace />;
+  }
+
+  if (role === 'admin' || user.email?.toLowerCase() === 'admin@mahfaza.com' || user.email?.toLowerCase().includes('mudur')) {
+    return <Navigate to="/admin/dashboard" replace />;
   }
 
   const targetRole = role === 'head_coach' ? 'coach' : (role || 'student');
@@ -93,7 +102,9 @@ export default function App() {
           {/* Student Protected Workspace */}
           <Route element={<DashboardLayout allowedRoles={['student', 'admin']} />}>
             <Route path="/student/dashboard" element={<StudentDashboardPage />} />
+            <Route path="/student/study-logs" element={<StudentStudyLogsPage />} />
             <Route path="/student/sessions" element={<StudentSessionsPage />} />
+            <Route path="/student/study-focus" element={<StudentSessionsPage />} />
             <Route path="/student/learning" element={<StudentLearningPage />} />
             <Route path="/student/schedule" element={<StudentSchedulePage />} />
             <Route path="/student/homework" element={<StudentHomeworkPage />} />
@@ -101,19 +112,24 @@ export default function App() {
             <Route path="/student/rewards" element={<StudentRewardsPage />} />
             <Route path="/student/xp" element={<StudentXPHistoryPage />} />
             <Route path="/student/xp-history" element={<StudentXPHistoryPage />} />
+            <Route path="/student/pricing" element={<PricingPage />} />
           </Route>
 
           {/* Admin Protected Workspace */}
           <Route element={<DashboardLayout allowedRoles={['admin']} />}>
+            <Route path="/admin" element={<AdminDashboardPage />} />
             <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
             <Route path="/admin/classes" element={<AdminClassesPage />} />
+            <Route path="/admin/timetable" element={<AdminTimetablePage />} />
+            <Route path="/admin/teachers" element={<AdminTeachersPage />} />
+            <Route path="/admin/attendance" element={<AdminAttendancePage />} />
+            <Route path="/admin/exams" element={<AdminExamsPage />} />
             <Route path="/admin/content" element={<AdminContentPage />} />
             <Route path="/admin/announcements" element={<AdminAnnouncementsPage />} />
             <Route path="/admin/subscriptions" element={<AdminSubscriptionsPage />} />
             <Route path="/admin/applications" element={<AdminApplicationsPage />} />
             <Route path="/admin/rewards" element={<AdminRewardsPage />} />
             <Route path="/admin/users" element={<AdminUsersPage />} />
-            <Route path="/admin/attendance" element={<TeacherAttendancePage />} />
             <Route path="/admin/audit" element={<AdminAuditPage />} />
           </Route>
 
@@ -140,6 +156,7 @@ export default function App() {
             <Route path="/counselor/notes" element={<CounselorDashboardPage />} />
             <Route path="/counselor/students" element={<AdminUsersPage />} />
             <Route path="/counselor/interviews" element={<StudentSchedulePage />} />
+            <Route path="/counselor/exams" element={<AdminExamsPage />} />
           </Route>
 
           {/* Coach Protected Workspace */}

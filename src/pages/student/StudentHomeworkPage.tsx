@@ -25,7 +25,7 @@ import {
 type TaskTab = 'all' | 'pending' | 'completed' | 'overdue';
 
 export const StudentHomeworkPage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [homeworks, setHomeworks] = useState<Homework[]>([]);
   const [coachTasks, setCoachTasks] = useState<CoachTask[]>([]);
   const [submissions, setSubmissions] = useState<Record<string, HomeworkSubmission>>({});
@@ -38,23 +38,30 @@ export const StudentHomeworkPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [submitFeedback, setSubmitFeedback] = useState<string | null>(null);
 
-  // Completing Coach Task
-  const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
+  // Submit Modal for Coach Task
+  const [selectedCoachTask, setSelectedCoachTask] = useState<CoachTask | null>(null);
+  const [taskEvidence, setTaskEvidence] = useState('');
+  const [coachSubmitting, setCoachSubmitting] = useState(false);
+  const [coachSubmitFeedback, setCoachSubmitFeedback] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id && !profile?.id) return;
     try {
       setLoading(true);
+      const studentPrimaryId = profile?.id || user?.id || '';
       const [hwList, userSubs, taskList] = await Promise.all([
-        homeworkService.getHomeworks(),
-        homeworkService.getStudentSubmissions(user.id),
-        coachTaskService.getTasksForStudent(user.id),
+        homeworkService.getHomeworks().catch(() => []),
+        homeworkService.getStudentSubmissions(studentPrimaryId).catch(() => []),
+        coachTaskService.getTasksForStudent(studentPrimaryId, {
+          email: user?.email || profile?.email,
+          profileId: profile?.id,
+        }).catch(() => []),
       ]);
-      setHomeworks(hwList);
-      setCoachTasks(taskList);
+      setHomeworks(hwList || []);
+      setCoachTasks(taskList || []);
 
       const subMap: Record<string, HomeworkSubmission> = {};
-      userSubs.forEach((s) => {
+      (userSubs || []).forEach((s) => {
         subMap[s.homework_id] = s;
       });
       setSubmissions(subMap);
@@ -63,10 +70,23 @@ export const StudentHomeworkPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [user?.id, user?.email, profile?.id, profile?.email]);
 
   useEffect(() => {
     loadData();
+
+    const handleTaskChange = () => {
+      loadData();
+    };
+    window.addEventListener('mahfaza:task_created', handleTaskChange);
+    window.addEventListener('mahfaza:tasks_updated', handleTaskChange);
+    window.addEventListener('mahfaza:new_notification', handleTaskChange);
+
+    return () => {
+      window.removeEventListener('mahfaza:task_created', handleTaskChange);
+      window.removeEventListener('mahfaza:tasks_updated', handleTaskChange);
+      window.removeEventListener('mahfaza:new_notification', handleTaskChange);
+    };
   }, [loadData]);
 
   const handleSubmitHomework = async () => {
@@ -101,12 +121,6 @@ export const StudentHomeworkPage: React.FC = () => {
       setSubmitting(false);
     }
   };
-
-  // Submit Modal for Coach Task
-  const [selectedCoachTask, setSelectedCoachTask] = useState<CoachTask | null>(null);
-  const [taskEvidence, setTaskEvidence] = useState('');
-  const [coachSubmitting, setCoachSubmitting] = useState(false);
-  const [coachSubmitFeedback, setCoachSubmitFeedback] = useState<string | null>(null);
 
   const handleOpenCoachTaskSubmit = (task: CoachTask) => {
     setSelectedCoachTask(task);
@@ -159,9 +173,10 @@ export const StudentHomeworkPage: React.FC = () => {
 
     // 1. Add Coach Assigned Tasks (Real Supabase tasks)
     coachTasks.forEach((task) => {
-      const isCompleted = task.status === 'verified' || task.status === 'completed' || task.status === 'approved';
-      const isPendingReview = task.status === 'pending_review' || task.status === 'submitted';
-      const isOverdue = !isCompleted && !isPendingReview && new Date(task.due_date) < now;
+      const rawStatus = (task.status || '').toLowerCase();
+      const isCompleted = rawStatus === 'verified' || rawStatus === 'completed' || rawStatus === 'approved' || rawStatus === 'tamamlandı';
+      const isPendingReview = rawStatus === 'pending_review' || rawStatus === 'submitted' || rawStatus === 'devam ediyor';
+      const isOverdue = !isCompleted && !isPendingReview && Boolean(task.due_date) && new Date(task.due_date) < now;
       list.push({
         type: 'coach_task',
         id: task.id,
@@ -205,6 +220,9 @@ export const StudentHomeworkPage: React.FC = () => {
 
   const filteredItems = useMemo(() => {
     if (activeTab === 'all') return unifiedList;
+    if (activeTab === 'pending') {
+      return unifiedList.filter((item) => item.status === 'pending' || item.status === 'pending_review');
+    }
     return unifiedList.filter((item) => item.status === activeTab);
   }, [unifiedList, activeTab]);
 
@@ -229,74 +247,75 @@ export const StudentHomeworkPage: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200/80">
         <div>
-          <span className="text-xs font-mono text-amber-400 uppercase tracking-wider">
+          <span className="text-xs font-semibold text-amber-600 uppercase tracking-wider flex items-center gap-1.5">
+            <Target className="w-4 h-4" />
             Akademik Görevler & Koçluk
           </span>
-          <h1 className="text-xl sm:text-2xl font-bold text-zinc-100 tracking-tight mt-0.5">
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight mt-1">
             Ödevlerim & Görevler
           </h1>
-          <p className="text-xs text-zinc-400 mt-1">
-            Koçunuz ve öğretmenleriniz tarafından atanan görevleri zamanında tamamlayarak XP kazanın.
+          <p className="text-xs text-slate-500 mt-1">
+            Koçunuz ve branş öğretmenleriniz tarafından atanan görevleri zamanında tamamlayarak XP kazanın.
           </p>
         </div>
       </div>
 
       {/* Tabs Filter Bar */}
-      <div className="flex flex-wrap items-center gap-2 p-1 bg-zinc-900/80 border border-zinc-800 rounded-lg">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={() => setActiveTab('pending')}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
             activeTab === 'pending'
-              ? 'bg-zinc-800 text-amber-400 shadow-xs'
-              : 'text-zinc-400 hover:text-zinc-200'
+              ? 'bg-amber-50 text-amber-800 border border-amber-200 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
           <span>Aktif Görevler</span>
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700 text-amber-300">
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-white border border-amber-200 text-amber-700 font-bold">
             {counts.pending}
           </span>
         </button>
 
         <button
           onClick={() => setActiveTab('completed')}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
             activeTab === 'completed'
-              ? 'bg-zinc-800 text-emerald-400 shadow-xs'
-              : 'text-zinc-400 hover:text-zinc-200'
+              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
           <span>Tamamlanan & Onaylananlar</span>
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700 text-emerald-300">
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-white border border-emerald-200 text-emerald-700 font-bold">
             {counts.completed}
           </span>
         </button>
 
         <button
           onClick={() => setActiveTab('overdue')}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
             activeTab === 'overdue'
-              ? 'bg-zinc-800 text-rose-400 shadow-xs'
-              : 'text-zinc-400 hover:text-zinc-200'
+              ? 'bg-rose-50 text-rose-800 border border-rose-200 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
           <span>Gecikenler</span>
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700 text-rose-300">
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-white border border-rose-200 text-rose-700 font-bold">
             {counts.overdue}
           </span>
         </button>
 
         <button
           onClick={() => setActiveTab('all')}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
             activeTab === 'all'
-              ? 'bg-zinc-800 text-zinc-100 shadow-xs'
-              : 'text-zinc-400 hover:text-zinc-200'
+              ? 'bg-slate-100 text-slate-900 border border-slate-300 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
           <span>Tümü</span>
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700 text-zinc-300">
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-white border border-slate-200 text-slate-700 font-bold">
             {counts.all}
           </span>
         </button>
@@ -315,7 +334,7 @@ export const StudentHomeworkPage: React.FC = () => {
               ? 'Harika! Teslim süresi geçmiş hiçbir göreviniz yok.'
               : 'Henüz atanmış ödev veya koç görevi bulunmamaktadır.'
           }
-          icon={<BookOpen className="w-8 h-8 text-zinc-500" />}
+          icon={<BookOpen className="w-8 h-8 text-slate-400" />}
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -330,10 +349,10 @@ export const StudentHomeworkPage: React.FC = () => {
             return (
               <div
                 key={`${item.type}-${item.id}`}
-                className={`bg-zinc-900/70 border rounded-lg p-5 flex flex-col justify-between hover:border-zinc-700 transition-colors ${
+                className={`bg-white border rounded-2xl p-5 flex flex-col justify-between hover:shadow-md transition-all shadow-xs ${
                   item.type === 'coach_task'
-                    ? 'border-amber-500/30 shadow-xs shadow-amber-950/20'
-                    : 'border-zinc-800'
+                    ? 'border-amber-300 bg-amber-50/20'
+                    : 'border-slate-200/90'
                 }`}
               >
                 <div>
@@ -341,21 +360,21 @@ export const StudentHomeworkPage: React.FC = () => {
                     <div>
                       <div className="flex items-center gap-2 mb-1">
                         <span
-                          className={`text-xs font-mono font-semibold px-2 py-0.5 rounded ${
+                          className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${
                             item.type === 'coach_task'
-                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                              : 'bg-zinc-800 text-zinc-300'
+                              ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                              : 'bg-slate-100 text-slate-700 border border-slate-200'
                           }`}
                         >
                           {item.badge_label}
                         </span>
                         {item.type === 'coach_task' && (
-                          <span className="text-[11px] text-amber-500/90 flex items-center gap-1 font-medium">
-                            <Sparkles className="w-3 h-3" /> Koç Tarafından Atandı
+                          <span className="text-[11px] text-amber-700 flex items-center gap-1 font-semibold">
+                            <Sparkles className="w-3.5 h-3.5 text-amber-500" /> Koç Görevi
                           </span>
                         )}
                       </div>
-                      <h3 className="text-base font-bold text-zinc-100">{item.title}</h3>
+                      <h3 className="text-base font-bold text-slate-900">{item.title}</h3>
                     </div>
 
                     {item.is_completed ? (
@@ -375,31 +394,31 @@ export const StudentHomeworkPage: React.FC = () => {
                   </div>
 
                   {item.description && (
-                    <p className="text-xs text-zinc-400 line-clamp-3 mb-3">{item.description}</p>
+                    <p className="text-xs text-slate-600 line-clamp-3 mb-3">{item.description}</p>
                   )}
                 </div>
 
-                <div className="mt-4 pt-3 border-t border-zinc-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 text-xs text-zinc-500">
-                    <span className="flex items-center gap-1">
-                      <Calendar className="w-3.5 h-3.5 text-zinc-400" />
+                <div className="mt-4 pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 text-xs text-slate-500">
+                    <span className="flex items-center gap-1 font-mono">
+                      <Calendar className="w-3.5 h-3.5 text-slate-400" />
                       Son: {dueDateFormatted}
                     </span>
-                    <span className="flex items-center gap-1 text-amber-400 font-mono font-semibold">
-                      <Award className="w-3.5 h-3.5" /> +{item.xp_reward} XP
+                    <span className="flex items-center gap-1 text-amber-700 font-mono font-bold">
+                      <Award className="w-3.5 h-3.5 text-amber-500" /> +{item.xp_reward} XP
                     </span>
                   </div>
 
                   {item.is_completed ? (
                     <div className="text-right">
-                      <span className="text-xs text-emerald-400 font-medium inline-flex items-center gap-1">
-                        <Check className="w-3.5 h-3.5" /> Onaylandı & XP Eklendi
+                      <span className="text-xs text-emerald-700 font-semibold inline-flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5 text-emerald-600" /> Onaylandı & XP Eklendi
                       </span>
                     </div>
                   ) : item.type === 'coach_task' && item.is_pending_review ? (
                     <div className="text-right">
-                      <span className="text-xs text-amber-400 font-medium inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded">
-                        <Clock className="w-3.5 h-3.5" /> Onay Bekliyor
+                      <span className="text-xs text-amber-800 font-semibold inline-flex items-center gap-1 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-xl">
+                        <Clock className="w-3.5 h-3.5 text-amber-600" /> Onay Bekliyor
                       </span>
                     </div>
                   ) : item.type === 'coach_task' ? (
@@ -438,14 +457,14 @@ export const StudentHomeworkPage: React.FC = () => {
             setSubmitFeedback(null);
           }}
           title={selectedHw.title}
-          subtitle={`${selectedHw.subject_name || 'Ödev'} &bull; Teslim Tarihi: ${new Date(
+          subtitle={`${selectedHw.subject_name || 'Ödev'} • Teslim Tarihi: ${new Date(
             selectedHw.due_at
           ).toLocaleDateString('tr-TR')}`}
         >
           <div className="space-y-4 text-xs">
             {selectedHw.description && (
-              <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-300 leading-relaxed">
-                <span className="text-[11px] font-semibold text-zinc-500 uppercase block mb-1">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 leading-relaxed">
+                <span className="text-[11px] font-semibold text-slate-500 uppercase block mb-1">
                   Ödev Açıklaması
                 </span>
                 {selectedHw.description}
@@ -453,38 +472,38 @@ export const StudentHomeworkPage: React.FC = () => {
             )}
 
             <div>
-              <label className="block text-zinc-300 font-medium mb-1.5">
-                Çözüm veya Teslim Notunuz <span className="text-rose-400">*</span>
+              <label className="block text-slate-700 font-semibold mb-1.5">
+                Çözüm veya Teslim Notunuz <span className="text-rose-500">*</span>
               </label>
               <textarea
                 value={submissionContent}
                 onChange={(e) => setSubmissionContent(e.target.value)}
                 placeholder="Ödev çözüm adımlarınızı, sonuçları veya dosya bağlantılarınızı buraya yazın..."
                 rows={5}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-amber-500/50"
+                className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
               />
             </div>
 
             {submitFeedback && (
               <div
-                className={`p-3 rounded text-xs flex items-center gap-2 ${
+                className={`p-3.5 rounded-xl text-xs flex items-center gap-2 ${
                   submitFeedback.includes('başarıyla')
-                    ? 'bg-emerald-950/60 border border-emerald-800 text-emerald-300'
-                    : 'bg-rose-950/60 border border-rose-800 text-rose-300'
+                    ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                    : 'bg-rose-50 border border-rose-200 text-rose-800'
                 }`}
               >
                 {submitFeedback.includes('başarıyla') ? (
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
                 ) : (
-                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
                 )}
-                <span>{submitFeedback}</span>
+                <span className="font-semibold">{submitFeedback}</span>
               </div>
             )}
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-zinc-800">
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
               <Button
-                variant="secondary"
+                variant="ghost"
                 size="sm"
                 onClick={() => {
                   setSelectedHw(null);
@@ -519,12 +538,12 @@ export const StudentHomeworkPage: React.FC = () => {
             setCoachSubmitFeedback(null);
           }}
           title={`Görevi Teslim Et: ${selectedCoachTask.title}`}
-          subtitle={`Ödül: +${selectedCoachTask.xp_reward} XP &bull; Son Tarih: ${new Date(selectedCoachTask.due_date).toLocaleDateString('tr-TR')}`}
+          subtitle={`Ödül: +${selectedCoachTask.xp_reward} XP • Son Tarih: ${new Date(selectedCoachTask.due_date).toLocaleDateString('tr-TR')}`}
         >
           <div className="space-y-4 text-xs">
             {selectedCoachTask.description && (
-              <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-300 leading-relaxed">
-                <span className="text-[11px] font-semibold text-zinc-500 uppercase block mb-1">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 leading-relaxed">
+                <span className="text-[11px] font-semibold text-slate-500 uppercase block mb-1">
                   Görev Açıklaması
                 </span>
                 {selectedCoachTask.description}
@@ -532,7 +551,7 @@ export const StudentHomeworkPage: React.FC = () => {
             )}
 
             <div>
-              <label className="block font-medium text-zinc-300 mb-1">
+              <label className="block font-semibold text-slate-700 mb-1.5">
                 Çalışma Özeti / Kanıt Notu (Opsiyonel)
               </label>
               <textarea
@@ -540,35 +559,35 @@ export const StudentHomeworkPage: React.FC = () => {
                 onChange={(e) => setTaskEvidence(e.target.value)}
                 placeholder="Örn: 80 soru çözüldü, formül kağıdı hazırlandı, drive linki..."
                 rows={3}
-                className="w-full p-2.5 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-amber-500/50 text-xs"
+                className="w-full p-3 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 text-xs"
               />
             </div>
 
-            <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300/90 text-[11px] flex items-center gap-2">
-              <Clock className="w-4 h-4 shrink-0 text-amber-400" />
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center gap-2">
+              <Clock className="w-4 h-4 shrink-0 text-amber-600" />
               <span>Göreviniz koçunuzun onay paneline iletilecektir. Koçunuz onayladığında +{selectedCoachTask.xp_reward} XP hesabınıza yüklenecektir.</span>
             </div>
 
             {coachSubmitFeedback && (
               <div
-                className={`p-3 rounded text-xs flex items-center gap-2 ${
+                className={`p-3.5 rounded-xl text-xs flex items-center gap-2 ${
                   coachSubmitFeedback.includes('başarıyla')
-                    ? 'bg-emerald-950/60 border border-emerald-800 text-emerald-300'
-                    : 'bg-rose-950/60 border border-rose-800 text-rose-300'
+                    ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                    : 'bg-rose-50 border border-rose-200 text-rose-800'
                 }`}
               >
                 {coachSubmitFeedback.includes('başarıyla') ? (
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
                 ) : (
-                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
                 )}
-                <span>{coachSubmitFeedback}</span>
+                <span className="font-semibold">{coachSubmitFeedback}</span>
               </div>
             )}
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-zinc-800">
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
               <Button
-                variant="secondary"
+                variant="ghost"
                 size="sm"
                 onClick={() => {
                   setSelectedCoachTask(null);

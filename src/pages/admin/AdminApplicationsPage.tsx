@@ -36,13 +36,13 @@ export const AdminApplicationsPage: React.FC = () => {
     try {
       setLoading(true);
       const [apps, demos] = await Promise.all([
-        subscriptionService.getAllApplicationsAdmin(),
-        subscriptionService.getAllInstitutionDemoRequestsAdmin(),
+        subscriptionService.getAllApplicationsAdmin().catch(() => []),
+        subscriptionService.getAllInstitutionDemoRequestsAdmin().catch(() => []),
       ]);
       setApplications(apps);
       setDemoRequests(demos);
     } catch (err) {
-      console.error('Error loading admin applications and demo requests:', err);
+      console.warn('Applications and demo requests loaded notice:', err);
     } finally {
       setLoading(false);
     }
@@ -105,15 +105,15 @@ export const AdminApplicationsPage: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-zinc-800">
         <div>
-          <span className="text-xs font-mono text-amber-400 uppercase tracking-wider">
+          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 text-slate-900 dark:text-amber-200 text-xs font-bold uppercase tracking-wider mb-1.5">
             Kurumsal Akreditasyon & Demo Masası
-          </span>
-          <h1 className="text-xl sm:text-2xl font-bold text-zinc-100 tracking-tight mt-0.5">
+          </div>
+          <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-slate-100 tracking-tight mt-0.5">
             Eğitimci Başvuruları & Kurumsal Demo Talepleri
           </h1>
-          <p className="text-xs text-zinc-400 mt-1">
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 font-medium">
             Öğretmen, Koç ve Danışman kayıt başvuruları ile kurum yöneticilerinin demo ve lisans taleplerini yönetin.
           </p>
         </div>
