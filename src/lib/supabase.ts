@@ -9,17 +9,19 @@ const supabaseAnonKey =
   (typeof process !== 'undefined' ? process.env?.VITE_SUPABASE_ANON_KEY : '') ||
   '';
 
-const targetUrl = supabaseUrl || 'https://lljzumduvnzenydiopnc.supabase.co';
-const targetKey = supabaseAnonKey || 'sb_publishable_vVNBi3PqvKVaHLSQ7d_zZQ_78l_mBGx';
-
 export const isSupabaseConfigured = Boolean(
-  targetUrl &&
-    targetKey &&
-    !targetUrl.includes('your-project-id') &&
-    !targetUrl.includes('placeholder-project') &&
-    !targetKey.includes('your-anon-key') &&
-    !targetKey.includes('unconfigured')
+  supabaseUrl &&
+    supabaseAnonKey &&
+    supabaseUrl.startsWith('https://') &&
+    !supabaseUrl.includes('your-project-id') &&
+    !supabaseUrl.includes('placeholder') &&
+    !supabaseAnonKey.includes('your-anon-key') &&
+    !supabaseAnonKey.includes('unconfigured')
 );
+
+// Fallback dummy URL only to prevent createClient from crashing during module import when unconfigured
+const targetUrl = isSupabaseConfigured ? supabaseUrl : 'https://placeholder.supabase.co';
+const targetKey = isSupabaseConfigured ? supabaseAnonKey : 'dummy-anon-key';
 
 /**
  * Custom fetch interceptor to prevent HTTP 400 "Request Header Or Cookie Too Large"

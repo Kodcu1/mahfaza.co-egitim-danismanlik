@@ -44,22 +44,30 @@ export const StudentRewardsPage: React.FC = () => {
   const studentSecondaryId = user?.id !== profile?.id ? user?.id : undefined;
 
   const loadData = useCallback(async () => {
-    if (!studentPrimaryId) return;
+    if (!studentPrimaryId) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
 
-      const [rws, reqs, xp, sub] = await Promise.all([
-        rewardService.getActiveRewards(),
-        rewardService.getStudentRequests(studentPrimaryId),
-        xpService.getStudentXP(studentPrimaryId, studentSecondaryId),
-        subscriptionService.getUserSubscription(studentPrimaryId).catch(() => null),
-      ]);
-      setRewards(rws);
-      setRequests(reqs);
-      setXpData(xp);
-      setSubscription(sub);
+      const fetchPromise = (async () => {
+        const [rws, reqs, xp, sub] = await Promise.all([
+          rewardService.getActiveRewards().catch(() => []),
+          rewardService.getStudentRequests(studentPrimaryId).catch(() => []),
+          xpService.getStudentXP(studentPrimaryId, studentSecondaryId).catch(() => null),
+          subscriptionService.getUserSubscription(studentPrimaryId).catch(() => null),
+        ]);
+        setRewards(rws || []);
+        setRequests(reqs || []);
+        setXpData(xp);
+        setSubscription(sub);
+      })();
+
+      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 1200));
+      await Promise.race([fetchPromise, timeoutPromise]);
     } catch (err) {
-      console.error('Error loading rewards data:', err);
+      console.warn('Notice loading student rewards data:', err);
     } finally {
       setLoading(false);
     }
@@ -67,6 +75,9 @@ export const StudentRewardsPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 1500);
     const handleLiveSync = () => {
       loadData();
     };
@@ -116,6 +127,7 @@ export const StudentRewardsPage: React.FC = () => {
     }
 
     return () => {
+      clearTimeout(safetyTimer);
       window.removeEventListener('mahfaza:xp-updated', handleLiveSync);
       window.removeEventListener('mahfaza:package-upgraded', handleLiveSync);
       window.removeEventListener('mahfaza:new_notification', handleLiveSync);

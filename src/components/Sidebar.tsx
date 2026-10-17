@@ -46,7 +46,7 @@ interface NavLinkItem {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ role, isOpen, onClose }) => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [unreadMessagesCount, setUnreadMessagesCount] = useState<number>(0);
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState<number>(0);
   const [scheduledMeetingsCount, setScheduledMeetingsCount] = useState<number>(0);
@@ -83,14 +83,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ role, isOpen, onClose }) => {
 
       // 3. Student-specific counts (pending assigned tasks)
       if (role === 'student') {
-        const tasks = await coachTaskService.getTasksForStudent(user.id).catch(() => []);
-        const pendingCount = (tasks || []).filter((t) => t.status === 'pending').length;
+        const studentPrimaryId = profile?.id || user.id;
+        const tasks = await coachTaskService.getTasksForStudent(studentPrimaryId, {
+          email: user.email,
+          profileId: profile?.id,
+        }).catch(() => []);
+        const pendingCount = (tasks || []).filter((t) => {
+          const s = (t.status || '').toLowerCase();
+          return s === 'pending' || s === 'bekliyor';
+        }).length;
         setStudentPendingTasksCount(pendingCount > 0 ? pendingCount : 0);
       }
     } catch {
       // Gracefully silent on transient network errors
     }
-  }, [user?.id, role]);
+  }, [user?.id, user?.email, profile?.id, role]);
 
   useEffect(() => {
     fetchBadgeCounts();
@@ -103,6 +110,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ role, isOpen, onClose }) => {
       fetchBadgeCounts();
     };
     window.addEventListener('mahfaza:counts-updated', handleSyncEvent);
+    window.addEventListener('mahfaza:task_created', handleSyncEvent);
+    window.addEventListener('mahfaza:tasks_updated', handleSyncEvent);
 
     // Real-time Supabase channel subscription
     let channel: any = null;
@@ -121,6 +130,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ role, isOpen, onClose }) => {
         )
         .on(
           'postgres_changes',
+          { event: '*', schema: 'public', table: 'coach_tasks' },
+          () => fetchBadgeCounts()
+        )
+        .on(
+          'postgres_changes',
           { event: '*', schema: 'public', table: 'tasks' },
           () => fetchBadgeCounts()
         )
@@ -135,6 +149,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ role, isOpen, onClose }) => {
     return () => {
       clearInterval(interval);
       window.removeEventListener('mahfaza:counts-updated', handleSyncEvent);
+      window.removeEventListener('mahfaza:task_created', handleSyncEvent);
+      window.removeEventListener('mahfaza:tasks_updated', handleSyncEvent);
       if (channel) {
         supabase.removeChannel(channel);
       }

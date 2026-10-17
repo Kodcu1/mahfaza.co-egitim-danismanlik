@@ -22,6 +22,20 @@ function saveLocalProofs(proofs: StudyProof[]) {
   }
 }
 
+async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([
+    promise.then((res) => {
+      clearTimeout(timer);
+      return res;
+    }),
+    timeoutPromise,
+  ]).catch(() => fallback);
+}
+
 export const studyProofService = {
   /**
    * Helper to convert File to base64 string safely
@@ -132,34 +146,38 @@ export const studyProofService = {
   },
 
   /**
-   * Get all study proofs for a student
+   * Get all study proofs for a student (Max 800ms)
    */
   async getStudentStudyProofs(
     studentId: string,
     secondaryStudentId?: string
   ): Promise<StudyProof[]> {
-    let remoteProofs: StudyProof[] = [];
-    try {
-      let query = supabase.from('study_proofs').select('*');
-      if (secondaryStudentId && secondaryStudentId !== studentId) {
-        query = query.or(`student_id.eq.${studentId},student_id.eq.${secondaryStudentId}`);
-      } else {
-        query = query.eq('student_id', studentId);
-      }
-      const { data, error } = await query.order('created_at', { ascending: false });
-
-      if (!error && data) {
-        remoteProofs = data as StudyProof[];
-      }
-    } catch {
-      // Ignore remote error
-    }
-
     const local = getLocalProofs().filter(
       (p) =>
         p.student_id === studentId ||
         (secondaryStudentId && p.student_id === secondaryStudentId)
     );
+
+    const fetchRemote = (async () => {
+      try {
+        let query = supabase.from('study_proofs').select('*');
+        if (secondaryStudentId && secondaryStudentId !== studentId) {
+          query = query.or(`student_id.eq.${studentId},student_id.eq.${secondaryStudentId}`);
+        } else {
+          query = query.eq('student_id', studentId);
+        }
+        const { data, error } = await query.order('created_at', { ascending: false });
+
+        if (!error && data && data.length > 0) {
+          return data as StudyProof[];
+        }
+      } catch {
+        // Ignore remote error
+      }
+      return [];
+    })();
+
+    const remoteProofs = await withTimeout(fetchRemote, 800, []);
     const combined = [...remoteProofs];
     for (const item of local) {
       if (!combined.some((c) => c.id === item.id)) {
@@ -173,33 +191,36 @@ export const studyProofService = {
   },
 
   /**
-   * Get all study proofs assigned to a coach or for linked students
+   * Get all study proofs assigned to a coach or for linked students (Max 800ms)
    */
   async getCoachStudyProofs(
     coachId: string,
     studentIds: string[] = []
   ): Promise<StudyProof[]> {
-    let remoteProofs: StudyProof[] = [];
-    try {
-      let query = supabase.from('study_proofs').select('*');
-      if (studentIds.length > 0) {
-        query = query.or(`coach_id.eq.${coachId},student_id.in.(${studentIds.join(',')})`);
-      } else {
-        query = query.eq('coach_id', coachId);
-      }
-
-      const { data, error } = await query.order('created_at', { ascending: false });
-      if (!error && data) {
-        remoteProofs = data as StudyProof[];
-      }
-    } catch {
-      // Ignore remote error
-    }
-
     const local = getLocalProofs().filter(
       (p) => p.coach_id === coachId || studentIds.includes(p.student_id)
     );
 
+    const fetchRemote = (async () => {
+      try {
+        let query = supabase.from('study_proofs').select('*');
+        if (studentIds.length > 0) {
+          query = query.or(`coach_id.eq.${coachId},student_id.in.(${studentIds.join(',')})`);
+        } else {
+          query = query.eq('coach_id', coachId);
+        }
+
+        const { data, error } = await query.order('created_at', { ascending: false });
+        if (!error && data && data.length > 0) {
+          return data as StudyProof[];
+        }
+      } catch {
+        // Ignore remote error
+      }
+      return [];
+    })();
+
+    const remoteProofs = await withTimeout(fetchRemote, 800, []);
     const combined = [...remoteProofs];
     for (const item of local) {
       if (!combined.some((c) => c.id === item.id)) {

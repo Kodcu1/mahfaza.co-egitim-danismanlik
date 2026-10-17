@@ -4,6 +4,7 @@ import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { Profile, UserRole } from '../../types';
 
 const SUPER_ADMIN_STORAGE_KEY = 'mahfaza_super_admin_session';
+const LOCAL_SESSION_KEY = 'mahfaza_local_session';
 
 interface AuthContextType {
   user: User | null;
@@ -12,7 +13,8 @@ interface AuthContextType {
   role: UserRole | null;
   loading: boolean;
   isConfigured: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: Error | null; isAdmin?: boolean }>;
+  signIn: (email: string, password: string) => Promise<{ error: Error | null; isAdmin?: boolean; targetRole?: UserRole }>;
+  loginLocally: (email: string, preferredRole?: UserRole) => { user: User; profile: Profile; targetRole: UserRole };
   signUp: (email: string, password: string, firstName: string, lastName: string, role?: UserRole) => Promise<{ error: Error | null; user?: User | null }>;
   signOut: () => Promise<void>;
   resetPasswordForEmail: (email: string) => Promise<{ error: Error | null }>;
@@ -22,7 +24,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const buildSuperAdminIdentity = (existingUser?: User | null, overrideEmail?: string): { user: User; profile: Profile } => {
+export const buildSuperAdminIdentity = (existingUser?: User | null, overrideEmail?: string): { user: User; profile: Profile } => {
   const email = (overrideEmail || existingUser?.email || 'admin@mahfaza.com').toLowerCase();
   const isMudur = email.includes('mudur');
   const adminId = existingUser?.id || (isMudur ? '00000000-0000-0000-0000-000000000002' : '00000000-0000-0000-0000-000000000001');
@@ -62,6 +64,117 @@ const buildSuperAdminIdentity = (existingUser?: User | null, overrideEmail?: str
   return { user: adminUser, profile: adminProfile };
 };
 
+export const buildLocalIdentity = (
+  email: string,
+  preferredRole?: UserRole
+): { user: User; profile: Profile; session: Session } => {
+  const cleanEmail = (email || 'kullanici@mahfaza.co').trim().toLowerCase();
+
+  let resolvedRole: UserRole = preferredRole || 'student';
+  if (
+    cleanEmail === 'admin@mahfaza.com' ||
+    cleanEmail === 'mudurdemo@mahfaza.com' ||
+    cleanEmail.includes('mudur') ||
+    cleanEmail.includes('admin')
+  ) {
+    resolvedRole = 'admin';
+  } else if (cleanEmail.includes('koc') || cleanEmail.includes('coach') || cleanEmail === 'demo.koc@mahfaza.co') {
+    resolvedRole = 'coach';
+  } else if (cleanEmail.includes('ogretmen') || cleanEmail.includes('teacher') || cleanEmail === 'demo.ogretmen@mahfaza.co') {
+    resolvedRole = 'teacher';
+  } else if (cleanEmail.includes('pdr') || cleanEmail.includes('counselor') || cleanEmail.includes('rehberlik')) {
+    resolvedRole = 'counselor';
+  } else if (cleanEmail.includes('veli') || cleanEmail.includes('parent')) {
+    resolvedRole = 'parent';
+  } else if (cleanEmail.includes('ogrenci') || cleanEmail.includes('student') || cleanEmail === 'demo.ogrenci@mahfaza.co') {
+    resolvedRole = 'student';
+  }
+
+  // Consistent ID for demo & fallback users
+  let userId = 'local-user-' + cleanEmail.replace(/[^a-z0-9]/g, '-');
+  if (resolvedRole === 'admin') {
+    userId = cleanEmail.includes('mudur') ? '00000000-0000-0000-0000-000000000002' : '00000000-0000-0000-0000-000000000001';
+  } else if (resolvedRole === 'coach') {
+    userId = '99999999-0000-0000-0000-000000000002';
+  } else if (resolvedRole === 'student') {
+    userId = '99999999-0000-0000-0000-000000000001';
+  } else if (resolvedRole === 'teacher') {
+    userId = '99999999-0000-0000-0000-000000000004';
+  } else if (resolvedRole === 'counselor') {
+    userId = '99999999-0000-0000-0000-000000000005';
+  } else if (resolvedRole === 'parent') {
+    userId = '99999999-0000-0000-0000-000000000006';
+  }
+
+  const prefix = cleanEmail.split('@')[0] || 'Kullanıcı';
+  let firstName = 'Kullanıcı';
+  let lastName = '';
+  if (resolvedRole === 'admin') {
+    firstName = cleanEmail.includes('mudur') ? 'Kurum' : 'Süper';
+    lastName = cleanEmail.includes('mudur') ? 'Müdürü' : 'Yönetici';
+  } else if (resolvedRole === 'coach') {
+    firstName = 'Koç';
+    lastName = 'Serkan Koçak';
+  } else if (resolvedRole === 'student') {
+    firstName = 'Ayşegül';
+    lastName = 'Koçak';
+  } else if (resolvedRole === 'teacher') {
+    firstName = 'Öğretmen';
+    lastName = 'Selin Aksoy';
+  } else if (resolvedRole === 'counselor') {
+    firstName = 'Rehberlik';
+    lastName = 'Zeynep Kaya';
+  } else if (resolvedRole === 'parent') {
+    firstName = 'Mehmet';
+    lastName = 'Koçak';
+  } else {
+    firstName = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+  }
+
+  const fullName = `${firstName} ${lastName}`.trim();
+  const now = new Date().toISOString();
+
+  const user: User = {
+    id: userId,
+    aud: 'authenticated',
+    role: 'authenticated',
+    email: cleanEmail,
+    app_metadata: { provider: 'email' },
+    user_metadata: {
+      first_name: firstName,
+      last_name: lastName,
+      full_name: fullName,
+      name: fullName,
+      role: resolvedRole,
+    },
+    created_at: now,
+  } as User;
+
+  const profile: Profile = {
+    id: userId,
+    email: cleanEmail,
+    first_name: firstName,
+    last_name: lastName,
+    full_name: fullName,
+    name: fullName,
+    role: resolvedRole,
+    avatar_url: null,
+    created_at: now,
+    updated_at: now,
+  };
+
+  const session: Session = {
+    access_token: 'local-token-' + userId,
+    refresh_token: 'local-refresh-' + userId,
+    expires_in: 86400,
+    expires_at: Math.floor(Date.now() / 1000) + 86400,
+    token_type: 'bearer',
+    user,
+  };
+
+  return { user, profile, session };
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -87,7 +200,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .eq('id', userId)
         .maybeSingle();
 
-      if (error || !data) {
+      if (error) {
+        console.warn('Profile fetch error from Supabase:', error.message);
+        return null;
+      }
+
+      if (!data) {
+        // Authenticated user has no profiles row yet (e.g. freshly registered)
         if (currentUser) {
           const email = currentUser.email || '';
           const emailPrefix = email.split('@')[0] || 'Kullanıcı';
@@ -96,9 +215,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const fullName = `${firstName} ${lastName}`.trim() || emailPrefix;
           const resolvedRole = (email.toLowerCase() === 'admin@mahfaza.com' || email.toLowerCase() === 'mudurdemo@mahfaza.com' ? 'admin' : (meta.role || 'student')) as UserRole;
 
-          // Auto-heal: ensure the authenticated user has a row in `profiles` table for Admin visibility and relationships
           try {
-            await supabase.from('profiles').upsert({
+            await supabase.from('profiles').insert({
               id: userId,
               user_id: userId,
               email,
@@ -107,7 +225,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               role: resolvedRole,
             });
           } catch {
-            // ignore
+            // ignore insert failure if restricted by RLS
           }
 
           return {
@@ -148,21 +266,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         created_at: row.created_at || new Date().toISOString(),
         updated_at: row.updated_at || new Date().toISOString(),
       };
-    } catch {
-      const currentUser = userRef.current;
-      if (currentUser) {
-        const meta = currentUser.user_metadata || {};
-        return {
-          id: userId,
-          email: currentUser.email || '',
-          first_name: meta.first_name || 'Kullanıcı',
-          last_name: meta.last_name || '',
-          role: (meta.role || 'student') as UserRole,
-          avatar_url: meta.avatar_url || null,
-          created_at: currentUser.created_at || new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-      }
+    } catch (err: any) {
+      console.warn('Profile fetch exception:', err?.message);
       return null;
     }
   }, []);
@@ -178,8 +283,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (p) setProfile(p);
   }, [fetchProfile]);
 
+  // Direct, instantaneous local login for explicit demo button exploration
+  const loginLocally = useCallback((email: string, preferredRole?: UserRole) => {
+    const identity = buildLocalIdentity(email, preferredRole);
+    setUser(identity.user);
+    setProfile(identity.profile);
+    setSession(identity.session);
+    setLoading(false);
+
+    try {
+      localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify({ ...identity, isDemo: true }));
+      if (identity.profile.role === 'admin') {
+        sessionStorage.setItem(SUPER_ADMIN_STORAGE_KEY, 'active');
+      }
+    } catch {
+      // ignore
+    }
+
+    return {
+      user: identity.user,
+      profile: identity.profile,
+      targetRole: identity.profile.role,
+    };
+  }, []);
+
   useEffect(() => {
-    // Check if super admin session is active in sessionStorage
+    // 1. Check super admin dev session in sessionStorage
     try {
       const storedAdmin = sessionStorage.getItem(SUPER_ADMIN_STORAGE_KEY);
       if (storedAdmin === 'active') {
@@ -187,6 +316,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(adminUser);
         setProfile(adminProf);
         setLoading(false);
+        return;
+      }
+    } catch {
+      // ignore
+    }
+
+    // 2. Check explicit demo session in localStorage
+    try {
+      const storedLocalRaw = localStorage.getItem(LOCAL_SESSION_KEY);
+      if (storedLocalRaw) {
+        const storedLocal = JSON.parse(storedLocalRaw);
+        if (storedLocal?.isDemo && storedLocal?.user && storedLocal?.profile) {
+          setUser(storedLocal.user);
+          setProfile(storedLocal.profile);
+          setSession(storedLocal.session || null);
+          setLoading(false);
+          return;
+        }
       }
     } catch {
       // ignore
@@ -199,72 +346,67 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     let isMounted = true;
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!isMounted) return;
-      if (session?.user) {
-        setSession(session);
-        setUser(session.user);
-        fetchProfile(session.user.id, session.user).then((p) => {
-          if (isMounted) {
-            setProfile(p);
-            setLoading(false);
-          }
-        });
-      } else {
-        // Keep super admin session if active
-        try {
-          if (sessionStorage.getItem(SUPER_ADMIN_STORAGE_KEY) === 'active') {
-            const { user: adminUser, profile: adminProf } = buildSuperAdminIdentity();
-            setUser(adminUser);
-            setProfile(adminProf);
-          }
-        } catch {
-          // ignore
-        }
+    // Safety timeout: Guarantee setLoading(false) within 1.2s max if Supabase network hangs or 504s
+    const safetyTimer = setTimeout(() => {
+      if (isMounted) {
         setLoading(false);
       }
-    }).catch(() => {
+    }, 1200);
+
+    // 3. Genuine remote Supabase session retrieval with single-flight profile loading
+    supabase.auth
+      .getSession()
+      .then(async ({ data: { session: remoteSession } }) => {
+        if (!isMounted) return;
+        if (remoteSession?.user) {
+          setSession(remoteSession);
+          setUser(remoteSession.user);
+          const p = await fetchProfile(remoteSession.user.id, remoteSession.user);
+          if (isMounted && p) {
+            setProfile(p);
+          }
+        }
+        if (isMounted) setLoading(false);
+      })
+      .catch((err) => {
+        console.warn('Supabase getSession network note:', err?.message);
+        if (isMounted) setLoading(false);
+      });
+
+    // 4. Supabase auth state listener (ignore duplicate INITIAL_SESSION to prevent race condition)
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      if (!isMounted) return;
+      if (event === 'INITIAL_SESSION') return; // Handled cleanly by getSession
+
+      if (newSession?.user) {
+        setSession(newSession);
+        setUser(newSession.user);
+        const p = await fetchProfile(newSession.user.id, newSession.user);
+        if (isMounted && p) setProfile(p);
+      } else if (event === 'SIGNED_OUT') {
+        setUser(null);
+        setSession(null);
+        setProfile(null);
+      }
       if (isMounted) setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, newSession) => {
-        if (!isMounted) return;
-        if (newSession?.user) {
-          setSession(newSession);
-          setUser(newSession.user);
-          const p = await fetchProfile(newSession.user.id, newSession.user);
-          if (isMounted) setProfile(p);
-        } else {
-          try {
-            if (sessionStorage.getItem(SUPER_ADMIN_STORAGE_KEY) === 'active') {
-              const { user: adminUser, profile: adminProf } = buildSuperAdminIdentity();
-              setUser(adminUser);
-              setProfile(adminProf);
-              setLoading(false);
-              return;
-            }
-          } catch {
-            // ignore
-          }
-          setSession(null);
-          setUser(null);
-          setProfile(null);
-        }
-        setLoading(false);
-      }
-    );
-
     return () => {
       isMounted = false;
+      clearTimeout(safetyTimer);
       subscription.unsubscribe();
     };
   }, [fetchProfile]);
 
-  const signIn = async (email: string, password: string): Promise<{ error: Error | null; isAdmin?: boolean }> => {
+  const signIn = async (
+    email: string,
+    password: string
+  ): Promise<{ error: Error | null; isAdmin?: boolean; targetRole?: UserRole }> => {
     const cleanEmail = email.trim().toLowerCase();
 
-    // Hidden Super Admin & Demo Mudur Intercept
+    // 1. Super Admin Dev credentials
     if ((cleanEmail === 'admin@mahfaza.com' || cleanEmail === 'mudurdemo@mahfaza.com') && password === '123456') {
       try {
         sessionStorage.setItem(SUPER_ADMIN_STORAGE_KEY, 'active');
@@ -284,43 +426,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setSession(signInData.session);
             setUser(adminUser);
             setProfile(adminProf);
-            try {
-              await supabase.from('profiles').upsert({
-                id: signInData.user.id,
-                email: cleanEmail,
-                full_name: cleanEmail.includes('mudur') ? 'Kurum Müdürü' : 'Süper Yönetici',
-                name: cleanEmail.includes('mudur') ? 'Kurum Müdürü' : 'Süper Yönetici',
-                role: 'admin',
-              });
-            } catch {
-              // ignore
-            }
-            return { error: null, isAdmin: true };
+            return { error: null, isAdmin: true, targetRole: 'admin' };
           }
         } catch {
-          // fallback to instant local admin session if Supabase account not yet created
+          // ignore
         }
       }
 
       const { user: adminUser, profile: adminProf } = buildSuperAdminIdentity(null, cleanEmail);
       setUser(adminUser);
       setProfile(adminProf);
-      return { error: null, isAdmin: true };
+      return { error: null, isAdmin: true, targetRole: 'admin' };
     }
 
+    // 2. Enforce configuration presence
     if (!isSupabaseConfigured) {
       return {
-        error: new Error('Supabase yapılandırması eksik: VITE_SUPABASE_URL ve VITE_SUPABASE_ANON_KEY ortam değişkenleri (.env) bulunamadı.'),
+        error: new Error(
+          'Supabase kimlik doğrulama servis yapılandırması eksik (VITE_SUPABASE_URL veya VITE_SUPABASE_ANON_KEY tanımlanmamış).'
+        ),
       };
     }
 
+    // 3. Genuine Supabase signInWithPassword — Strictly report true result without masking errors
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: cleanEmail,
         password,
       });
-      if (error) throw error;
-      return { error: null, isAdmin: false };
+
+      if (error) {
+        return { error: error as Error };
+      }
+
+      if (!data?.user) {
+        return { error: new Error('Giriş başarısız: Kullanıcı bilgisi doğrulanamadı.') };
+      }
+
+      // Successful authentic login
+      setUser(data.user);
+      setSession(data.session);
+
+      const p = await fetchProfile(data.user.id, data.user);
+      if (p) {
+        setProfile(p);
+      }
+
+      const resolvedRole = (p?.role || data.user.user_metadata?.role || 'student') as UserRole;
+      return { error: null, isAdmin: resolvedRole === 'admin', targetRole: resolvedRole };
     } catch (err: any) {
       return { error: err as Error };
     }
@@ -353,61 +506,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const cleanEmail = email.trim().toLowerCase();
         const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
 
-        // Ensure profile row is created synchronously using exact DB schema columns
         try {
-          const { error: upsertErr } = await supabase
-            .from('profiles')
-            .upsert({
-              id: data.user.id,
-              user_id: data.user.id,
-              email: cleanEmail,
-              full_name: fullName,
-              name: fullName,
-              role: safeRole,
-            });
-
-          if (upsertErr) {
-            await supabase.from('profiles').upsert({
-              id: data.user.id,
-              email: cleanEmail,
-              full_name: fullName,
-              role: safeRole,
-            });
-          }
+          await supabase.from('profiles').upsert({
+            id: data.user.id,
+            user_id: data.user.id,
+            email: cleanEmail,
+            full_name: fullName,
+            name: fullName,
+            role: safeRole,
+          });
         } catch {
           // ignore
         }
 
-        if (!data.session) {
-          const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
-            email: cleanEmail,
-            password,
-          });
-          if (!signInErr && signInData.user) {
-            // Re-ensure profile row after authenticated session is established
-            try {
-              await supabase.from('profiles').upsert({
-                id: signInData.user.id,
-                user_id: signInData.user.id,
-                email: cleanEmail,
-                full_name: fullName,
-                name: fullName,
-                role: safeRole,
-              });
-            } catch {
-              // ignore
-            }
-            setUser(signInData.user);
-            setSession(signInData.session);
-            const p = await fetchProfile(signInData.user.id, signInData.user);
-            setProfile(p);
-          }
-        } else {
-          setUser(data.user);
-          setSession(data.session);
-          const p = await fetchProfile(data.user.id, data.user);
-          setProfile(p);
-        }
+        setUser(data.user);
+        setSession(data.session);
+        const p = await fetchProfile(data.user.id, data.user);
+        setProfile(p);
       }
 
       return { error: null, user: data?.user || null };
@@ -443,6 +558,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signOut = async () => {
     try {
       sessionStorage.removeItem(SUPER_ADMIN_STORAGE_KEY);
+      localStorage.removeItem(LOCAL_SESSION_KEY);
     } catch {
       // ignore
     }
@@ -465,6 +581,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         isConfigured: isSupabaseConfigured,
         signIn,
+        loginLocally,
         signUp,
         signOut,
         resetPasswordForEmail,

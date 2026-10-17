@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet, Navigate } from 'react-router-dom';
 import { useAuth } from '../features/auth/AuthContext';
 import { Sidebar } from '../components/Sidebar';
@@ -13,8 +13,21 @@ interface DashboardLayoutProps {
 export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ allowedRoles }) => {
   const { user, role, loading } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [safetyTimeoutTriggered, setSafetyTimeoutTriggered] = useState(false);
 
-  if (loading) {
+  // Global Fail-Safe: Force unblock after 1.2s max so layout never traps pages in infinite spinner
+  useEffect(() => {
+    if (loading) {
+      const timer = setTimeout(() => {
+        setSafetyTimeoutTriggered(true);
+      }, 1200);
+      return () => clearTimeout(timer);
+    }
+  }, [loading]);
+
+  const effectiveLoading = loading && !safetyTimeoutTriggered;
+
+  if (effectiveLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <LoadingState message="Oturum ve yetki matrisi doğrulanıyor..." />

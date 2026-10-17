@@ -64,85 +64,89 @@ export const AdminDashboardPage: React.FC = () => {
 
   const loadAdminData = useCallback(async () => {
     try {
-      setLoading(true);
-      const [fetchedUsers, cls, sessions] = await Promise.all([
-        relationshipService.getAllUsersAdmin().catch(() => []),
-        academicService.getClasses().catch(() => []),
-        attendanceService.getSessions().catch(() => []),
-      ]);
+      const fetchPromise = (async () => {
+        const [fetchedUsers, cls, sessions] = await Promise.all([
+          relationshipService.getAllUsersAdmin().catch(() => []),
+          academicService.getClasses().catch(() => []),
+          attendanceService.getSessions().catch(() => []),
+        ]);
 
-      const stu = fetchedUsers.filter((u) => u.role === 'student');
-      const tch = fetchedUsers.filter((u) => u.role === 'teacher');
-      const cou = fetchedUsers.filter((u) => u.role === 'counselor');
+        const stu = fetchedUsers.filter((u) => u.role === 'student');
+        const tch = fetchedUsers.filter((u) => u.role === 'teacher');
+        const cou = fetchedUsers.filter((u) => u.role === 'counselor');
 
-      setStudents(stu);
-      setTeachers(tch);
-      setCounselors(cou);
-      setClasses(cls);
+        setStudents(stu);
+        setTeachers(tch);
+        setCounselors(cou);
+        setClasses(cls);
 
-      // Construct dynamic institutional recent activity feed
-      const activities: SystemActivity[] = [];
+        // Construct dynamic institutional recent activity feed
+        const activities: SystemActivity[] = [];
 
-      // 1. Recent user registrations
-      const sortedUsers = [...fetchedUsers].sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
-      sortedUsers.slice(0, 4).forEach((u, idx) => {
-        const roleLabels: Record<string, string> = {
-          student: 'Öğrenci',
-          teacher: 'Öğretmen',
-          counselor: 'Rehberlik / PDR',
-          coach: 'Koç',
-          head_coach: 'Baş Koç',
-          parent: 'Veli',
-          admin: 'Yönetici',
-        };
-        activities.push({
-          id: `reg-${u.id}-${idx}`,
-          type: 'registration',
-          title: 'Yeni Kullanıcı Kaydı',
-          description: `${u.first_name || u.name} kurumsal sisteme katıldı.`,
-          user_name: `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.name || 'Kullanıcı',
-          role: roleLabels[u.role] || u.role,
-          timestamp: new Date(u.created_at).toLocaleDateString('tr-TR', {
-            hour: '2-digit',
-            minute: '2-digit',
-          }),
-          badge_color: u.role === 'student' ? 'emerald' : u.role === 'teacher' ? 'sky' : 'indigo',
+        // 1. Recent user registrations
+        const sortedUsers = [...fetchedUsers].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        sortedUsers.slice(0, 4).forEach((u, idx) => {
+          const roleLabels: Record<string, string> = {
+            student: 'Öğrenci',
+            teacher: 'Öğretmen',
+            counselor: 'Rehberlik / PDR',
+            coach: 'Koç',
+            head_coach: 'Baş Koç',
+            parent: 'Veli',
+            admin: 'Yönetici',
+          };
+          activities.push({
+            id: `reg-${u.id}-${idx}`,
+            type: 'registration',
+            title: 'Yeni Kullanıcı Kaydı',
+            description: `${u.first_name || u.name} kurumsal sisteme katıldı.`,
+            user_name: `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.name || 'Kullanıcı',
+            role: roleLabels[u.role] || u.role,
+            timestamp: new Date(u.created_at).toLocaleDateString('tr-TR', {
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+            badge_color: u.role === 'student' ? 'emerald' : u.role === 'teacher' ? 'sky' : 'indigo',
+          });
         });
-      });
 
-      // 2. Recent attendance sessions
-      sessions.slice(0, 3).forEach((s, idx) => {
-        activities.push({
-          id: `att-${s.id}-${idx}`,
-          type: 'attendance',
-          title: 'Ders Yoklaması Tamamlandı',
-          description: `${s.class_name || 'Şube'} için ${s.period}. ders yoklaması sisteme işlendi.`,
-          user_name: 'Ders Öğretmeni',
-          role: 'Yoklama',
-          timestamp: new Date(s.date).toLocaleDateString('tr-TR'),
-          badge_color: 'sky',
+        // 2. Recent attendance sessions
+        sessions.slice(0, 3).forEach((s, idx) => {
+          activities.push({
+            id: `att-${s.id}-${idx}`,
+            type: 'attendance',
+            title: 'Ders Yoklaması Tamamlandı',
+            description: `${s.class_name || 'Şube'} için ${s.period}. ders yoklaması sisteme işlendi.`,
+            user_name: 'Ders Öğretmeni',
+            role: 'Yoklama',
+            timestamp: new Date(s.date).toLocaleDateString('tr-TR'),
+            badge_color: 'sky',
+          });
         });
-      });
 
-      // 3. Recent classes
-      cls.slice(0, 3).forEach((c, idx) => {
-        activities.push({
-          id: `cls-${c.id}-${idx}`,
-          type: 'class',
-          title: 'Akademik Şube Tanımlandı',
-          description: `${c.name} (${c.grade_level}. Sınıf - ${c.academic_year}) müfredata eklendi.`,
-          user_name: 'Müdürlük',
-          role: 'Yönetim',
-          timestamp: new Date(c.created_at || Date.now()).toLocaleDateString('tr-TR'),
-          badge_color: 'amber',
+        // 3. Recent classes
+        cls.slice(0, 3).forEach((c, idx) => {
+          activities.push({
+            id: `cls-${c.id}-${idx}`,
+            type: 'class',
+            title: 'Akademik Şube Tanımlandı',
+            description: `${c.name} (${c.grade_level}. Sınıf - ${c.academic_year}) müfredata eklendi.`,
+            user_name: 'Müdürlük',
+            role: 'Yönetim',
+            timestamp: new Date(c.created_at || Date.now()).toLocaleDateString('tr-TR'),
+            badge_color: 'amber',
+          });
         });
-      });
 
-      // Sort and take top 6
-      activities.sort((a, b) => b.id.localeCompare(a.id));
-      setRecentActivities(activities.slice(0, 6));
+        // Sort and take top 6
+        activities.sort((a, b) => b.id.localeCompare(a.id));
+        setRecentActivities(activities.slice(0, 6));
+      })();
+
+      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 2000));
+      await Promise.race([fetchPromise, timeoutPromise]);
     } catch (err) {
       console.warn('Admin dashboard load notice:', err);
     } finally {

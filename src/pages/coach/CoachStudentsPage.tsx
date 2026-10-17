@@ -93,7 +93,10 @@ export const CoachStudentsPage: React.FC = () => {
   }, [user?.id]);
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
     const cacheKey = `mahfaza_coach_students_${user.id}`;
     const unlinkedIds = getUnlinkedIds();
 
@@ -113,38 +116,52 @@ export const CoachStudentsPage: React.FC = () => {
     }
 
     try {
-      const [studs, myInviteCode] = await Promise.all([
-        relationshipService.getCoachAssignedStudents(user.id),
-        relationshipService.getCoachInviteCode(user.id),
-      ]);
-
-      // Filter out permanently deleted students (ghost data elimination)
-      const validStudents = (studs || []).filter((s) => !unlinkedIds.includes(s.id));
-
-      setStudents(validStudents);
-      localStorage.setItem(cacheKey, JSON.stringify(validStudents));
-      setCoachInviteCode(myInviteCode);
-
-      const xpMap: Record<string, StudentXPData | null> = {};
-      const examsMap: Record<string, ExamResult[]> = {};
-      const subMap: Record<string, UserSubscription | null> = {};
-
-      for (const s of validStudents) {
-        const [xp, exams, sub] = await Promise.all([
-          xpService.getStudentXP(s.id),
-          examService.getStudentExamResults(s.id),
-          subscriptionService.getUserSubscription(s.id).catch(() => null),
+      const fetchPromise = (async () => {
+        const [studs, myInviteCode] = await Promise.all([
+          relationshipService.getCoachAssignedStudents(user.id).catch(() => []),
+          relationshipService.getCoachInviteCode(user.id).catch(() => ''),
         ]);
-        xpMap[s.id] = xp;
-        examsMap[s.id] = exams;
-        subMap[s.id] = sub;
-      }
 
-      setStudentXPMap(xpMap);
-      setStudentExamsMap(examsMap);
-      setStudentSubMap(subMap);
+        // Filter out permanently deleted students (ghost data elimination)
+        const validStudents = (studs || []).filter((s) => !unlinkedIds.includes(s.id));
+
+        setStudents(validStudents);
+        if (validStudents.length > 0) {
+          try {
+            localStorage.setItem(cacheKey, JSON.stringify(validStudents));
+          } catch {
+            // ignore
+          }
+        }
+        setCoachInviteCode(myInviteCode);
+
+        const xpMap: Record<string, StudentXPData | null> = {};
+        const examsMap: Record<string, ExamResult[]> = {};
+        const subMap: Record<string, UserSubscription | null> = {};
+
+        // Fetch student portfolio stats in parallel (NOT serial) to eliminate 20+ second delays
+        await Promise.all(
+          validStudents.map(async (s) => {
+            const [xp, exams, sub] = await Promise.all([
+              xpService.getStudentXP(s.id).catch(() => null),
+              examService.getStudentExamResults(s.id).catch(() => []),
+              subscriptionService.getUserSubscription(s.id).catch(() => null),
+            ]);
+            xpMap[s.id] = xp;
+            examsMap[s.id] = exams;
+            subMap[s.id] = sub;
+          })
+        );
+
+        setStudentXPMap(xpMap);
+        setStudentExamsMap(examsMap);
+        setStudentSubMap(subMap);
+      })();
+
+      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 1200));
+      await Promise.race([fetchPromise, timeoutPromise]);
     } catch (err) {
-      console.error('Error loading coach students portfolio:', err);
+      console.warn('Notice loading coach students portfolio:', err);
     } finally {
       setLoading(false);
     }
@@ -152,6 +169,9 @@ export const CoachStudentsPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 1500);
     const handleSync = () => loadData();
     const handleProfileUpdate = (e: any) => {
       if (e?.detail?.userId && e?.detail?.avatarUrl) {
@@ -160,10 +180,14 @@ export const CoachStudentsPage: React.FC = () => {
         );
       }
     };
-
+    window.addEventListener('mahfaza:student-assigned', handleSync);
+    window.addEventListener('mahfaza:student-unlinked', handleSync);
     window.addEventListener('mahfaza:xp-updated', handleSync);
     window.addEventListener('mahfaza:profile-updated', handleProfileUpdate);
     return () => {
+      clearTimeout(safetyTimer);
+      window.removeEventListener('mahfaza:student-assigned', handleSync);
+      window.removeEventListener('mahfaza:student-unlinked', handleSync);
       window.removeEventListener('mahfaza:xp-updated', handleSync);
       window.removeEventListener('mahfaza:profile-updated', handleProfileUpdate);
     };

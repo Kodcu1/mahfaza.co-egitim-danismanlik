@@ -1,6 +1,20 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { Profile } from '../types';
 
+async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([
+    promise.then((res) => {
+      clearTimeout(timer);
+      return res;
+    }),
+    timeoutPromise,
+  ]).catch(() => fallback);
+}
+
 export const relationshipService = {
   async getProfilesByRole(role: string): Promise<Profile[]> {
     const demoFallback: Record<string, Profile[]> = {
@@ -395,59 +409,89 @@ export const relationshipService = {
   },
 
   /**
-   * Get students assigned to a coach directly from authoritative Supabase coach_students & coach_student_links tables
+   * Get students assigned to a coach directly from authoritative Supabase coach_students & coach_student_links tables (Max 800ms)
    */
   async getCoachAssignedStudents(coachId: string): Promise<Profile[]> {
-    if (!isSupabaseConfigured || !coachId) return [];
+    if (!coachId) return [];
 
+    const unlinkedKey = `mahfaza_unlinked_${coachId}`;
+    let unlinkedIds: string[] = [];
     try {
-      const unlinkedKey = `mahfaza_unlinked_${coachId}`;
-      let unlinkedIds: string[] = [];
-      try {
-        unlinkedIds = JSON.parse(localStorage.getItem(unlinkedKey) || '[]');
-      } catch {
-        unlinkedIds = [];
-      }
-
-      // Query both coach_students and coach_student_links in parallel and merge unique student_ids
-      const [{ data: csLinks }, { data: cslLinks }] = await Promise.all([
-        supabase.from('coach_students').select('student_id').eq('coach_id', coachId),
-        supabase.from('coach_student_links').select('student_id').eq('coach_id', coachId),
-      ]);
-
-      const studentIdSet = new Set<string>();
-      (csLinks || []).forEach((l: any) => {
-        if (l?.student_id) studentIdSet.add(l.student_id);
-      });
-      (cslLinks || []).forEach((l: any) => {
-        if (l?.student_id) studentIdSet.add(l.student_id);
-      });
-
-      let studentIds = Array.from(studentIdSet).filter((id) => !unlinkedIds.includes(id));
-
-      // Self-heal demo coach <-> demo student relationship if empty
-      if (studentIds.length === 0) {
-        const healedIds = await this.ensureDemoCoachStudentLink(coachId, unlinkedIds);
-        studentIds = healedIds.filter((id) => !unlinkedIds.includes(id));
-      }
-
-      if (studentIds.length === 0) return [];
-
-      const { data: profiles, error: pError } = await supabase
-        .from('profiles')
-        .select('id, email, full_name, name, role, avatar_url, created_at, updated_at')
-        .in('id', studentIds);
-
-      if (pError || !profiles) return [];
-
-      return profiles.map((p: any) => ({
-        ...p,
-        first_name: p.first_name || (p.full_name ? p.full_name.split(' ')[0] : (p.name ? p.name.split(' ')[0] : 'Öğrenci')),
-        last_name: p.last_name || (p.full_name ? p.full_name.split(' ').slice(1).join(' ') : (p.name ? p.name.split(' ').slice(1).join(' ') : '')),
-      })) as Profile[];
+      unlinkedIds = JSON.parse(localStorage.getItem(unlinkedKey) || '[]');
     } catch {
-      return [];
+      unlinkedIds = [];
     }
+
+    // Check fast local cache first
+    let cachedList: Profile[] = [];
+    try {
+      const cached = localStorage.getItem(`mahfaza_coach_students_${coachId}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          cachedList = parsed.filter((s: Profile) => !unlinkedIds.includes(s.id));
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    if (!isSupabaseConfigured) {
+      return cachedList;
+    }
+
+    const fetchRemote = (async () => {
+      try {
+        // Query both coach_students and coach_student_links in parallel and merge unique student_ids
+        const [{ data: csLinks }, { data: cslLinks }] = await Promise.all([
+          supabase.from('coach_students').select('student_id').eq('coach_id', coachId),
+          supabase.from('coach_student_links').select('student_id').eq('coach_id', coachId),
+        ]);
+
+        const studentIdSet = new Set<string>();
+        (csLinks || []).forEach((l: any) => {
+          if (l?.student_id) studentIdSet.add(l.student_id);
+        });
+        (cslLinks || []).forEach((l: any) => {
+          if (l?.student_id) studentIdSet.add(l.student_id);
+        });
+
+        let studentIds = Array.from(studentIdSet).filter((id) => !unlinkedIds.includes(id));
+
+        // Self-heal demo coach <-> demo student relationship if empty
+        if (studentIds.length === 0) {
+          const healedIds = await this.ensureDemoCoachStudentLink(coachId, unlinkedIds);
+          studentIds = healedIds.filter((id) => !unlinkedIds.includes(id));
+        }
+
+        if (studentIds.length === 0) return cachedList;
+
+        const { data: profiles, error: pError } = await supabase
+          .from('profiles')
+          .select('id, email, full_name, name, role, avatar_url, created_at, updated_at')
+          .in('id', studentIds);
+
+        if (pError || !profiles || profiles.length === 0) return cachedList;
+
+        const mapped = profiles.map((p: any) => ({
+          ...p,
+          first_name: p.first_name || (p.full_name ? p.full_name.split(' ')[0] : (p.name ? p.name.split(' ')[0] : 'Öğrenci')),
+          last_name: p.last_name || (p.full_name ? p.full_name.split(' ').slice(1).join(' ') : (p.name ? p.name.split(' ').slice(1).join(' ') : '')),
+        })) as Profile[];
+
+        try {
+          localStorage.setItem(`mahfaza_coach_students_${coachId}`, JSON.stringify(mapped));
+        } catch {
+          // ignore
+        }
+
+        return mapped;
+      } catch {
+        return cachedList;
+      }
+    })();
+
+    return await withTimeout(fetchRemote, 800, cachedList);
   },
 
   /**

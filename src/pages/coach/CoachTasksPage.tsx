@@ -52,42 +52,65 @@ export const CoachTasksPage: React.FC = () => {
   const [feedback, setFeedback] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
+
+    // 1. Instant local storage cache hydration
     try {
-      setLoading(true);
-      let [studs, tList] = await Promise.all([
-        relationshipService.getCoachAssignedStudents(user.id),
-        coachTaskService.getTasksForCoach(user.id, { email: user?.email, profileId: profile?.id }),
-      ]);
-
-      // If no students assigned via pairing yet, load all registered students to enable coach assigning
-      if (!studs || studs.length === 0) {
-        studs = await relationshipService.getProfilesByRole('student');
+      const rawTasks = localStorage.getItem('mahfaza_tasks');
+      if (rawTasks) {
+        const parsed = JSON.parse(rawTasks);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setTasks(parsed);
+          setLoading(false);
+        }
       }
+    } catch {
+      // ignore
+    }
 
-      setAssignedStudents(studs);
-      setTasks((prev) => {
-        const map = new Map<string, CoachTask>();
-        // Keep any active unsaved local tasks
-        prev.forEach((t) => map.set(t.id, t));
-        (tList || []).forEach((t) => map.set(t.id, t));
-        return Array.from(map.values()).sort(
-          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
-      });
+    try {
+      const fetchPromise = (async () => {
+        let [studs, tList] = await Promise.all([
+          relationshipService.getCoachAssignedStudents(user.id).catch(() => []),
+          coachTaskService.getTasksForCoach(user.id, { email: user?.email, profileId: profile?.id }).catch(() => []),
+        ]);
 
-      if (studs.length > 0 && !selectedStudentId) {
-        setSelectedStudentId(studs[0].id);
-      }
+        if (!studs || studs.length === 0) {
+          studs = await relationshipService.getProfilesByRole('student').catch(() => []);
+        }
+
+        setAssignedStudents(studs || []);
+        setTasks((prev) => {
+          const map = new Map<string, CoachTask>();
+          prev.forEach((t) => map.set(t.id, t));
+          (tList || []).forEach((t) => map.set(t.id, t));
+          return Array.from(map.values()).sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          );
+        });
+
+        if (studs && studs.length > 0) {
+          setSelectedStudentId((prev) => prev || studs[0].id);
+        }
+      })();
+
+      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 1200));
+      await Promise.race([fetchPromise, timeoutPromise]);
     } catch (err) {
-      console.error('Error loading coach tasks:', err);
+      console.warn('Notice loading coach tasks:', err);
     } finally {
       setLoading(false);
     }
-  }, [user?.id, user?.email, profile?.id, selectedStudentId]);
+  }, [user?.id, user?.email, profile?.id]);
 
   useEffect(() => {
     loadData();
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 1500);
 
     const handleTaskChange = () => {
       loadData();
@@ -96,6 +119,7 @@ export const CoachTasksPage: React.FC = () => {
     window.addEventListener('mahfaza:tasks_updated', handleTaskChange);
 
     return () => {
+      clearTimeout(safetyTimer);
       window.removeEventListener('mahfaza:task_created', handleTaskChange);
       window.removeEventListener('mahfaza:tasks_updated', handleTaskChange);
     };
@@ -376,7 +400,12 @@ export const CoachTasksPage: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500 font-mono">
                     <span className="flex items-center gap-1 text-slate-700 font-medium">
                       <User className="w-3.5 h-3.5 text-amber-600" />
-                      {task.student?.first_name} {task.student?.last_name || 'Öğrenci'}
+                      {task.student?.full_name ||
+                        task.student?.name ||
+                        (task.student?.first_name
+                          ? `${task.student.first_name} ${task.student.last_name || ''}`.trim()
+                          : '') ||
+                        'Öğrenci'}
                     </span>
                     <span className="flex items-center gap-1">
                       <Calendar className="w-3.5 h-3.5 text-slate-400" />

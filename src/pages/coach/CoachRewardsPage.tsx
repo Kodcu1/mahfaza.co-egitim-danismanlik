@@ -64,34 +64,48 @@ export const CoachRewardsPage: React.FC = () => {
   const [processError, setProcessError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
     try {
-      setLoading(true);
+      const fetchPromise = (async () => {
+        // 1. Load coach rewards & assigned students in parallel
+        const [rws, assignedStudents] = await Promise.all([
+          rewardService.getCoachRewards(user.id).catch(() => []),
+          relationshipService.getCoachAssignedStudents(user.id).catch(() => []),
+        ]);
+        setRewards(rws || []);
 
-      // 1. Load coach rewards
-      const rws = await rewardService.getCoachRewards(user.id);
-      setRewards(rws);
+        const studentIds = (assignedStudents || []).map((s) => s.id);
 
-      // 2. Load assigned students and their requests
-      const assignedStudents = await relationshipService.getCoachAssignedStudents(user.id);
-      const studentIds = assignedStudents.map((s) => s.id);
+        if (studentIds.length > 0) {
+          const reqs = await rewardService.getCoachPendingRequests(studentIds).catch(() => []);
+          setRequests(reqs || []);
 
-      if (studentIds.length > 0) {
-        const reqs = await rewardService.getCoachPendingRequests(studentIds);
-        setRequests(reqs);
-
-        // Load XP for each student with pending requests
-        const xpMap: Record<string, number> = {};
-        for (const sId of studentIds) {
-          const xp = await xpService.getStudentXP(sId);
-          xpMap[sId] = xp?.wallet_xp || 0;
+          // Load XP for students with pending requests in parallel
+          const xpMap: Record<string, number> = {};
+          await Promise.all(
+            studentIds.map(async (sId) => {
+              try {
+                const xp = await xpService.getStudentXP(sId);
+                xpMap[sId] = xp?.wallet_xp || 0;
+              } catch {
+                xpMap[sId] = 0;
+              }
+            })
+          );
+          setStudentXPMap(xpMap);
+        } else {
+          setRequests([]);
+          setStudentXPMap({});
         }
-        setStudentXPMap(xpMap);
-      } else {
-        setRequests([]);
-      }
+      })();
+
+      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 1200));
+      await Promise.race([fetchPromise, timeoutPromise]);
     } catch (err) {
-      console.error('Error loading coach rewards data:', err);
+      console.warn('Notice loading coach rewards data:', err);
     } finally {
       setLoading(false);
     }
@@ -99,6 +113,10 @@ export const CoachRewardsPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 1500);
+    return () => clearTimeout(safetyTimer);
   }, [loadData]);
 
   const handleOpenCreateModal = () => {

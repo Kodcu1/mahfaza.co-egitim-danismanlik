@@ -23,57 +23,138 @@ function mapRowToReward(row: any): Reward {
   };
 }
 
+async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([
+    promise.then((res) => {
+      clearTimeout(timer);
+      return res;
+    }),
+    timeoutPromise,
+  ]).catch(() => fallback);
+}
+
+const DEFAULT_REWARDS: Reward[] = [
+  {
+    id: 'reward-def-1',
+    title: 'Birebir Koçluk Seansı (45 Dk)',
+    description: 'Koçunuzla birebir YKS strateji ve haftalık planlama görüşmesi.',
+    category: 'Akademik',
+    rarity: 'epic',
+    cost_xp: 350,
+    xp_price: 350,
+    real_cost: 0,
+    icon: 'Target',
+    stock: null,
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 'reward-def-2',
+    title: 'Mahfaza VIP Başarı Rozeti',
+    description: 'Profilinizde parlayan özel Mahfaza şampiyonlar ligi rozeti.',
+    category: 'Rozet & Unvan',
+    rarity: 'rare',
+    cost_xp: 150,
+    xp_price: 150,
+    real_cost: 0,
+    icon: 'Award',
+    stock: null,
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 'reward-def-3',
+    title: 'Özel Deneme Sınavı Kitapçığı',
+    description: 'Türkiye geneli derece seviyesi deneme sınavı ve çözüm rehberi.',
+    category: 'Fiziksel',
+    rarity: 'legendary',
+    cost_xp: 600,
+    xp_price: 600,
+    real_cost: 0,
+    icon: 'BookOpen',
+    stock: 25,
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+];
+
 export const rewardService = {
   /**
-   * Get all active rewards for Student Reward Shop
+   * Get all active rewards for Student Reward Shop (Max 800ms)
    */
   async getRewards(): Promise<Reward[]> {
-    const { data, error } = await supabase
-      .from('rewards')
-      .select('*')
-      .eq('is_active', true)
-      .order('cost_xp', { ascending: true });
+    const fetchRemote = (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('rewards')
+          .select('*')
+          .eq('is_active', true)
+          .order('cost_xp', { ascending: true });
 
-    if (error) {
-      console.warn('Error fetching rewards:', error.message);
-      return [];
-    }
+        if (!error && data && data.length > 0) {
+          return data.map(mapRowToReward);
+        }
+      } catch {
+        // ignore
+      }
+      return DEFAULT_REWARDS;
+    })();
 
-    return (data || []).map(mapRowToReward);
+    return await withTimeout(fetchRemote, 800, DEFAULT_REWARDS);
   },
 
   /**
-   * Get all rewards for Coach / Admin management
+   * Get all rewards for Coach / Admin management (Max 800ms)
    */
   async getAllRewardsAdmin(): Promise<Reward[]> {
-    const { data, error } = await supabase
-      .from('rewards')
-      .select('*')
-      .order('created_at', { ascending: false });
+    const fetchRemote = (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('rewards')
+          .select('*')
+          .order('created_at', { ascending: false });
 
-    if (error) {
-      console.warn('Error fetching all rewards:', error.message);
-      return [];
-    }
+        if (!error && data && data.length > 0) {
+          return data.map(mapRowToReward);
+        }
+      } catch {
+        // ignore
+      }
+      return DEFAULT_REWARDS;
+    })();
 
-    return (data || []).map(mapRowToReward);
+    return await withTimeout(fetchRemote, 800, DEFAULT_REWARDS);
   },
 
   /**
-   * Get rewards created by or available to a specific coach
+   * Get rewards created by or available to a specific coach (Max 800ms)
    */
   async getCoachRewards(coachId: string): Promise<Reward[]> {
-    const { data, error } = await supabase
-      .from('rewards')
-      .select('*')
-      .or(`coach_id.eq.${coachId},coach_id.is.null`)
-      .order('created_at', { ascending: false });
+    const fetchRemote = (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('rewards')
+          .select('*')
+          .or(`coach_id.eq.${coachId},coach_id.is.null`)
+          .order('created_at', { ascending: false });
 
-    if (error) {
-      return this.getAllRewardsAdmin();
-    }
+        if (!error && data && data.length > 0) {
+          return data.map(mapRowToReward);
+        }
+      } catch {
+        // ignore
+      }
+      return DEFAULT_REWARDS;
+    })();
 
-    return (data || []).map(mapRowToReward);
+    return await withTimeout(fetchRemote, 800, DEFAULT_REWARDS);
   },
 
   /**
@@ -230,130 +311,154 @@ export const rewardService = {
   },
 
   /**
-   * Get student's reward requests
+   * Get student's reward requests (Max 800ms)
    */
   async getStudentRequests(studentId: string): Promise<RewardRequest[]> {
-    const { data: requests, error } = await supabase
-      .from('reward_requests')
-      .select('*')
-      .eq('student_id', studentId)
-      .order('requested_at', { ascending: false });
+    const fetchRemote = (async () => {
+      try {
+        const { data: requests, error } = await supabase
+          .from('reward_requests')
+          .select('*')
+          .eq('student_id', studentId)
+          .order('requested_at', { ascending: false });
 
-    if (error || !requests) return [];
+        if (error || !requests || requests.length === 0) return [];
 
-    const rewardIds = [...new Set(requests.map((r: any) => r.reward_id).filter(Boolean))];
-    const { data: rewards } = await supabase
-      .from('rewards')
-      .select('*')
-      .in('id', rewardIds);
+        const rewardIds = [...new Set(requests.map((r: any) => r.reward_id).filter(Boolean))];
+        const { data: rewards } = await supabase
+          .from('rewards')
+          .select('*')
+          .in('id', rewardIds);
 
-    const rewardMap = new Map((rewards || []).map((rw: any) => [rw.id, mapRowToReward(rw)]));
+        const rewardMap = new Map((rewards || []).map((rw: any) => [rw.id, mapRowToReward(rw)]));
 
-    return requests.map((row: any) => ({
-      id: row.id,
-      student_id: row.student_id,
-      reward_id: row.reward_id,
-      cost_xp: row.cost_xp,
-      status: row.status,
-      requested_at: row.requested_at || row.created_at,
-      reviewed_at: row.processed_at || row.reviewed_at,
-      reviewed_by: row.reviewed_by,
-      admin_note: row.coach_notes || row.admin_note,
-      coach_notes: row.coach_notes || row.admin_note,
-      reward: rewardMap.get(row.reward_id),
-    }));
+        return requests.map((row: any) => ({
+          id: row.id,
+          student_id: row.student_id,
+          reward_id: row.reward_id,
+          cost_xp: row.cost_xp,
+          status: row.status,
+          requested_at: row.requested_at || row.created_at,
+          reviewed_at: row.processed_at || row.reviewed_at,
+          reviewed_by: row.reviewed_by,
+          admin_note: row.coach_notes || row.admin_note,
+          coach_notes: row.coach_notes || row.admin_note,
+          reward: rewardMap.get(row.reward_id),
+        }));
+      } catch {
+        return [];
+      }
+    })();
+
+    return await withTimeout(fetchRemote, 800, []);
   },
 
   /**
-   * Get all reward requests for Admin view
+   * Get all reward requests for Admin view (Max 800ms)
    */
   async getAllRequestsAdmin(): Promise<RewardRequest[]> {
-    const { data: requests, error } = await supabase
-      .from('reward_requests')
-      .select('*')
-      .order('requested_at', { ascending: false });
+    const fetchRemote = (async () => {
+      try {
+        const { data: requests, error } = await supabase
+          .from('reward_requests')
+          .select('*')
+          .order('requested_at', { ascending: false });
 
-    if (error || !requests) return [];
+        if (error || !requests || requests.length === 0) return [];
 
-    const rewardIds = [...new Set(requests.map((r: any) => r.reward_id).filter(Boolean))];
-    const studentIds = [...new Set(requests.map((r: any) => r.student_id).filter(Boolean))];
+        const rewardIds = [...new Set(requests.map((r: any) => r.reward_id).filter(Boolean))];
+        const studentIds = [...new Set(requests.map((r: any) => r.student_id).filter(Boolean))];
 
-    const [{ data: rewards }, { data: profiles }] = await Promise.all([
-      supabase.from('rewards').select('*').in('id', rewardIds),
-      supabase.from('profiles').select('id, email, name, full_name, avatar_url').in('id', studentIds),
-    ]);
+        const [{ data: rewards }, { data: profiles }] = await Promise.all([
+          supabase.from('rewards').select('*').in('id', rewardIds),
+          supabase.from('profiles').select('id, email, name, full_name, avatar_url').in('id', studentIds),
+        ]);
 
-    const rewardMap = new Map((rewards || []).map((rw: any) => [rw.id, mapRowToReward(rw)]));
-    const profileMap = new Map((profiles || []).map((p: any) => [
-      p.id,
-      {
-        ...p,
-        first_name: p.first_name || (p.full_name ? p.full_name.split(' ')[0] : 'Öğrenci'),
-        last_name: p.last_name || (p.full_name ? p.full_name.split(' ').slice(1).join(' ') : ''),
-      },
-    ]));
+        const rewardMap = new Map((rewards || []).map((rw: any) => [rw.id, mapRowToReward(rw)]));
+        const profileMap = new Map((profiles || []).map((p: any) => [
+          p.id,
+          {
+            ...p,
+            first_name: p.first_name || (p.full_name ? p.full_name.split(' ')[0] : 'Öğrenci'),
+            last_name: p.last_name || (p.full_name ? p.full_name.split(' ').slice(1).join(' ') : ''),
+          },
+        ]));
 
-    return requests.map((row: any) => ({
-      id: row.id,
-      student_id: row.student_id,
-      reward_id: row.reward_id,
-      cost_xp: row.cost_xp,
-      status: row.status,
-      requested_at: row.requested_at || row.created_at,
-      reviewed_at: row.processed_at || row.reviewed_at,
-      reviewed_by: row.reviewed_by,
-      admin_note: row.coach_notes || row.admin_note,
-      coach_notes: row.coach_notes || row.admin_note,
-      reward: rewardMap.get(row.reward_id),
-      student: profileMap.get(row.student_id),
-    }));
+        return requests.map((row: any) => ({
+          id: row.id,
+          student_id: row.student_id,
+          reward_id: row.reward_id,
+          cost_xp: row.cost_xp,
+          status: row.status,
+          requested_at: row.requested_at || row.created_at,
+          reviewed_at: row.processed_at || row.reviewed_at,
+          reviewed_by: row.reviewed_by,
+          admin_note: row.coach_notes || row.admin_note,
+          coach_notes: row.coach_notes || row.admin_note,
+          reward: rewardMap.get(row.reward_id),
+          student: profileMap.get(row.student_id),
+        }));
+      } catch {
+        return [];
+      }
+    })();
+
+    return await withTimeout(fetchRemote, 800, []);
   },
 
   /**
-   * Get pending or all requests for coach assigned students
+   * Get pending or all requests for coach assigned students (Max 800ms)
    */
   async getCoachPendingRequests(studentIds: string[]): Promise<RewardRequest[]> {
     if (!studentIds || studentIds.length === 0) return [];
 
-    const { data: requests, error } = await supabase
-      .from('reward_requests')
-      .select('*')
-      .in('student_id', studentIds)
-      .order('requested_at', { ascending: false });
+    const fetchRemote = (async () => {
+      try {
+        const { data: requests, error } = await supabase
+          .from('reward_requests')
+          .select('*')
+          .in('student_id', studentIds)
+          .order('requested_at', { ascending: false });
 
-    if (error || !requests) return [];
+        if (error || !requests || requests.length === 0) return [];
 
-    const rewardIds = [...new Set(requests.map((r: any) => r.reward_id).filter(Boolean))];
+        const rewardIds = [...new Set(requests.map((r: any) => r.reward_id).filter(Boolean))];
 
-    const [{ data: rewards }, { data: profiles }] = await Promise.all([
-      supabase.from('rewards').select('*').in('id', rewardIds),
-      supabase.from('profiles').select('id, email, name, full_name, avatar_url').in('id', studentIds),
-    ]);
+        const [{ data: rewards }, { data: profiles }] = await Promise.all([
+          supabase.from('rewards').select('*').in('id', rewardIds),
+          supabase.from('profiles').select('id, email, name, full_name, avatar_url').in('id', studentIds),
+        ]);
 
-    const rewardMap = new Map((rewards || []).map((rw: any) => [rw.id, mapRowToReward(rw)]));
-    const profileMap = new Map((profiles || []).map((p: any) => [
-      p.id,
-      {
-        ...p,
-        first_name: p.first_name || (p.full_name ? p.full_name.split(' ')[0] : 'Öğrenci'),
-        last_name: p.last_name || (p.full_name ? p.full_name.split(' ').slice(1).join(' ') : ''),
-      },
-    ]));
+        const rewardMap = new Map((rewards || []).map((rw: any) => [rw.id, mapRowToReward(rw)]));
+        const profileMap = new Map((profiles || []).map((p: any) => [
+          p.id,
+          {
+            ...p,
+            first_name: p.first_name || (p.full_name ? p.full_name.split(' ')[0] : 'Öğrenci'),
+            last_name: p.last_name || (p.full_name ? p.full_name.split(' ').slice(1).join(' ') : ''),
+          },
+        ]));
 
-    return requests.map((row: any) => ({
-      id: row.id,
-      student_id: row.student_id,
-      reward_id: row.reward_id,
-      cost_xp: row.cost_xp,
-      status: row.status,
-      requested_at: row.requested_at || row.created_at,
-      reviewed_at: row.processed_at || row.reviewed_at,
-      reviewed_by: row.reviewed_by,
-      admin_note: row.coach_notes || row.admin_note,
-      coach_notes: row.coach_notes || row.admin_note,
-      reward: rewardMap.get(row.reward_id),
-      student: profileMap.get(row.student_id),
-    }));
+        return requests.map((row: any) => ({
+          id: row.id,
+          student_id: row.student_id,
+          reward_id: row.reward_id,
+          cost_xp: row.cost_xp,
+          status: row.status,
+          requested_at: row.requested_at || row.created_at,
+          reviewed_at: row.processed_at || row.reviewed_at,
+          reviewed_by: row.reviewed_by,
+          admin_note: row.coach_notes || row.admin_note,
+          coach_notes: row.coach_notes || row.admin_note,
+          reward: rewardMap.get(row.reward_id),
+          student: profileMap.get(row.student_id),
+        }));
+      } catch {
+        return [];
+      }
+    })();
+
+    return await withTimeout(fetchRemote, 800, []);
   },
 
   /**

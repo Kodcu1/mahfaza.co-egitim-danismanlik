@@ -76,31 +76,38 @@ export const CoachApprovalsPage: React.FC = () => {
   }, [toastMessage]);
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
     try {
-      setLoading(true);
-      const [students, coachTasks] = await Promise.all([
-        relationshipService.getCoachAssignedStudents(user.id),
-        coachTaskService.getTasksForCoach(user.id),
-      ]);
-      setAssignedStudents(students);
-      const studentIds = students.map((s) => s.id);
+      const fetchPromise = (async () => {
+        const [students, coachTasks] = await Promise.all([
+          relationshipService.getCoachAssignedStudents(user.id).catch(() => []),
+          coachTaskService.getTasksForCoach(user.id).catch(() => []),
+        ]);
+        setAssignedStudents(students || []);
+        const studentIds = (students || []).map((s) => s.id);
 
-      // Load Study Proofs & Rewards in parallel
-      const [proofs, reqs] = await Promise.all([
-        studyProofService.getCoachStudyProofs(user.id, studentIds),
-        studentIds.length > 0 ? rewardService.getCoachPendingRequests(studentIds) : Promise.resolve([]),
-      ]);
+        // Load Study Proofs & Rewards in parallel
+        const [proofs, reqs] = await Promise.all([
+          studyProofService.getCoachStudyProofs(user.id, studentIds).catch(() => []),
+          studentIds.length > 0 ? rewardService.getCoachPendingRequests(studentIds).catch(() => []) : Promise.resolve([]),
+        ]);
 
-      setStudyProofs(proofs || []);
-      setRequests(reqs || []);
+        setStudyProofs(proofs || []);
+        setRequests(reqs || []);
 
-      const tasksToReview = coachTasks.filter(
-        (t) => t.status === 'pending_review' || t.status === 'submitted' || t.status === 'completed'
-      );
-      setPendingTasks(tasksToReview);
+        const tasksToReview = (coachTasks || []).filter(
+          (t) => t.status === 'pending_review' || t.status === 'submitted' || t.status === 'completed'
+        );
+        setPendingTasks(tasksToReview);
+      })();
+
+      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 1200));
+      await Promise.race([fetchPromise, timeoutPromise]);
     } catch (err) {
-      console.error('Error loading coach approvals:', err);
+      console.warn('Notice loading coach approvals:', err);
     } finally {
       setLoading(false);
     }
@@ -108,6 +115,10 @@ export const CoachApprovalsPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 1500);
+    return () => clearTimeout(safetyTimer);
   }, [loadData]);
 
   // Proof Actions
@@ -313,14 +324,24 @@ export const CoachApprovalsPage: React.FC = () => {
     return <LoadingState message="Ödül ve XP onay merkezi yükleniyor..." />;
   }
 
-  const pendingProofsCount = studyProofs.filter((p) => p.status === 'pending').length;
-  const pendingRewardCount = requests.filter((r) => r.status === 'pending').length;
+  const pendingProofsCount = React.useMemo(
+    () => studyProofs.filter((p) => p.status === 'pending').length,
+    [studyProofs]
+  );
+  const pendingRewardCount = React.useMemo(
+    () => requests.filter((r) => r.status === 'pending').length,
+    [requests]
+  );
   const pendingTaskCount = pendingTasks.length;
 
-  const filteredProofs = studyProofs.filter((p) => {
-    if (proofFilter === 'all') return true;
-    return p.status === proofFilter;
-  });
+  const filteredProofs = React.useMemo(
+    () =>
+      studyProofs.filter((p) => {
+        if (proofFilter === 'all') return true;
+        return p.status === proofFilter;
+      }),
+    [studyProofs, proofFilter]
+  );
 
   return (
     <div className="space-y-6">

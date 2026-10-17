@@ -108,6 +108,7 @@ export default function App() {
             <Route path="/student/learning" element={<StudentLearningPage />} />
             <Route path="/student/schedule" element={<StudentSchedulePage />} />
             <Route path="/student/homework" element={<StudentHomeworkPage />} />
+            <Route path="/student/tasks" element={<StudentHomeworkPage />} />
             <Route path="/student/exams" element={<StudentExamsPage />} />
             <Route path="/student/rewards" element={<StudentRewardsPage />} />
             <Route path="/student/xp" element={<StudentXPHistoryPage />} />

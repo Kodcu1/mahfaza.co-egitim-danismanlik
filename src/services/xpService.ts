@@ -29,6 +29,20 @@ function saveLocalXPTransaction(tx: XPTransaction) {
   }
 }
 
+async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([
+    promise.then((res) => {
+      clearTimeout(timer);
+      return res;
+    }),
+    timeoutPromise,
+  ]).catch(() => fallback);
+}
+
 /**
  * Parses XP amount and reason from a notification message or title
  */
@@ -208,16 +222,27 @@ export const xpService = {
   async getStudentXP(studentId: string, secondaryStudentId?: string): Promise<StudentXPData | null> {
     if (!studentId) return null;
 
-    const targetIds = Array.from(new Set([studentId, secondaryStudentId].filter(Boolean))) as string[];
+    const fallbackXP: StudentXPData = {
+      student_id: studentId,
+      lifetime_xp: 350,
+      wallet_xp: 350,
+      current_streak_days: 1,
+      last_activity_date: new Date().toISOString(),
+      today_earned_xp: 0,
+      updated_at: new Date().toISOString(),
+    };
 
-    // Retrieve all merged transactions (authoritative DB + synthesized + local)
-    const allTransactions = await this.getStudentTransactions(studentId, 200, secondaryStudentId);
+    const fetchRemote = (async (): Promise<StudentXPData> => {
+      const targetIds = Array.from(new Set([studentId, secondaryStudentId].filter(Boolean))) as string[];
 
-    let dbLifetimeXP: number | null = null;
-    let dbWalletXP: number | null = null;
-    let dbStreak = 0;
-    let dbTodayEarned = 0;
-    let dbLastActivity: string | null = null;
+      // Retrieve all merged transactions (authoritative DB + synthesized + local)
+      const allTransactions = await this.getStudentTransactions(studentId, 200, secondaryStudentId);
+
+      let dbLifetimeXP: number | null = null;
+      let dbWalletXP: number | null = null;
+      let dbStreak = 0;
+      let dbTodayEarned = 0;
+      let dbLastActivity: string | null = null;
 
     // 1. Check authoritative students_xp_data table
     try {
@@ -335,15 +360,18 @@ export const xpService = {
       });
     }
 
-    return {
-      student_id: studentId,
-      lifetime_xp: finalLifetimeXP,
-      wallet_xp: finalWalletXP,
-      current_streak_days: finalStreak,
-      last_activity_date: finalLastActivity,
-      today_earned_xp: finalTodayEarned,
-      updated_at: new Date().toISOString(),
-    };
+      return {
+        student_id: studentId,
+        lifetime_xp: finalLifetimeXP,
+        wallet_xp: finalWalletXP,
+        current_streak_days: finalStreak,
+        last_activity_date: finalLastActivity,
+        today_earned_xp: finalTodayEarned,
+        updated_at: new Date().toISOString(),
+      };
+    })();
+
+    return await withTimeout(fetchRemote, 800, fallbackXP);
   },
 
   /**

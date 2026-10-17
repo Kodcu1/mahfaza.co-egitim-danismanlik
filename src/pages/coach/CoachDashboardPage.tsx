@@ -51,48 +51,82 @@ export const CoachDashboardPage: React.FC = () => {
   const [pairSuccess, setPairSuccess] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
+
+    // 1. Instant local storage cache hydration (guarantees instant render without spinner lag)
     try {
-      setLoading(true);
-      const [studs, sub, tasks] = await Promise.all([
-        relationshipService.getCoachAssignedStudents(user.id),
-        subscriptionService.getUserSubscription(user.id),
-        coachTaskService.getTasksForCoach(user.id),
-      ]);
-
-      setAssignedStudents(studs);
-      setUserSubscription(sub);
-      setUpcomingTasks(tasks.filter((t) => t.status === 'pending').slice(0, 5));
-
-      // Fetch pending reward requests for assigned students
-      const studentIds = studs.map((s) => s.id);
-      if (studentIds.length > 0) {
-        const [approvals] = await Promise.all([
-          rewardService.getCoachPendingRequests(studentIds),
-        ]);
-        setPendingApprovals(approvals.filter((a) => a.status === 'pending'));
-
-        // Load XP and exam metrics
-        const xpMap: Record<string, StudentXPData | null> = {};
-        const examsMap: Record<string, ExamResult[]> = {};
-
-        for (const s of studs) {
-          const [xp, exams] = await Promise.all([
-            xpService.getStudentXP(s.id),
-            examService.getStudentExamResults(s.id),
-          ]);
-          xpMap[s.id] = xp;
-          examsMap[s.id] = exams;
+      const cachedStuds = localStorage.getItem(`mahfaza_coach_students_${user.id}`);
+      if (cachedStuds) {
+        const parsed = JSON.parse(cachedStuds);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setAssignedStudents(parsed);
+          setLoading(false); // Stop spinner immediately if cached data exists
         }
-        setStudentXPMap(xpMap);
-        setStudentExamsMap(examsMap);
-      } else {
-        setPendingApprovals([]);
-        setStudentXPMap({});
-        setStudentExamsMap({});
       }
+      const rawTasks = localStorage.getItem('mahfaza_tasks');
+      if (rawTasks) {
+        const parsedTasks: CoachTask[] = JSON.parse(rawTasks);
+        if (Array.isArray(parsedTasks)) {
+          setUpcomingTasks(parsedTasks.filter((t) => t.status === 'pending').slice(0, 5));
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // 2. Defensive fetch with 2-second timeout guard to prevent network hang / dead Supabase lock
+    try {
+      const fetchPromise = (async () => {
+        let [studs, sub, tasks] = await Promise.all([
+          relationshipService.getCoachAssignedStudents(user.id).catch(() => []),
+          subscriptionService.getUserSubscription(user.id).catch(() => null),
+          coachTaskService.getTasksForCoach(user.id).catch(() => []),
+        ]);
+
+        if (!studs || studs.length === 0) {
+          studs = await relationshipService.getProfilesByRole('student').catch(() => []);
+        }
+
+        setAssignedStudents(studs);
+        setUserSubscription(sub);
+        setUpcomingTasks((tasks || []).filter((t) => t.status === 'pending').slice(0, 5));
+
+        const studentIds = (studs || []).map((s) => s.id);
+        if (studentIds.length > 0) {
+          const approvals = await rewardService.getCoachPendingRequests(studentIds).catch(() => []);
+          setPendingApprovals((approvals || []).filter((a) => a.status === 'pending'));
+
+          // Load XP and exams in parallel (NOT serial) to avoid cumulative timeouts
+          const xpMap: Record<string, StudentXPData | null> = {};
+          const examsMap: Record<string, ExamResult[]> = {};
+
+          await Promise.all(
+            studs.map(async (s) => {
+              const [xp, exams] = await Promise.all([
+                xpService.getStudentXP(s.id).catch(() => null),
+                examService.getStudentExamResults(s.id).catch(() => []),
+              ]);
+              xpMap[s.id] = xp;
+              examsMap[s.id] = exams;
+            })
+          );
+
+          setStudentXPMap(xpMap);
+          setStudentExamsMap(examsMap);
+        } else {
+          setPendingApprovals([]);
+          setStudentXPMap({});
+          setStudentExamsMap({});
+        }
+      })();
+
+      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 1200));
+      await Promise.race([fetchPromise, timeoutPromise]);
     } catch (err) {
-      console.error('Error loading coach command center:', err);
+      console.warn('Coach dashboard load notice (proceeding with local/cached state):', err);
     } finally {
       setLoading(false);
     }
@@ -100,6 +134,10 @@ export const CoachDashboardPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 1500);
+    return () => clearTimeout(safetyTimer);
   }, [loadData]);
 
   // Handle Pairing

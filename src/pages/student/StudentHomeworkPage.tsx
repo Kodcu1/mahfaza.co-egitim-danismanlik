@@ -45,28 +45,35 @@ export const StudentHomeworkPage: React.FC = () => {
   const [coachSubmitFeedback, setCoachSubmitFeedback] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
-    if (!user?.id && !profile?.id) return;
+    if (!user?.id && !profile?.id) {
+      setLoading(false);
+      return;
+    }
     try {
-      setLoading(true);
       const studentPrimaryId = profile?.id || user?.id || '';
-      const [hwList, userSubs, taskList] = await Promise.all([
-        homeworkService.getHomeworks().catch(() => []),
-        homeworkService.getStudentSubmissions(studentPrimaryId).catch(() => []),
-        coachTaskService.getTasksForStudent(studentPrimaryId, {
-          email: user?.email || profile?.email,
-          profileId: profile?.id,
-        }).catch(() => []),
-      ]);
-      setHomeworks(hwList || []);
-      setCoachTasks(taskList || []);
+      const fetchPromise = (async () => {
+        const [hwList, userSubs, taskList] = await Promise.all([
+          homeworkService.getHomeworks().catch(() => []),
+          homeworkService.getStudentSubmissions(studentPrimaryId).catch(() => []),
+          coachTaskService.getTasksForStudent(studentPrimaryId, {
+            email: user?.email || profile?.email,
+            profileId: profile?.id,
+          }).catch(() => []),
+        ]);
+        setHomeworks(hwList || []);
+        setCoachTasks(taskList || []);
 
-      const subMap: Record<string, HomeworkSubmission> = {};
-      (userSubs || []).forEach((s) => {
-        subMap[s.homework_id] = s;
-      });
-      setSubmissions(subMap);
+        const subMap: Record<string, HomeworkSubmission> = {};
+        (userSubs || []).forEach((s) => {
+          subMap[s.homework_id] = s;
+        });
+        setSubmissions(subMap);
+      })();
+
+      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 1200));
+      await Promise.race([fetchPromise, timeoutPromise]);
     } catch (err) {
-      console.error('Error fetching homeworks/tasks:', err);
+      console.warn('Notice fetching homeworks/tasks:', err);
     } finally {
       setLoading(false);
     }
@@ -74,6 +81,9 @@ export const StudentHomeworkPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 1500);
 
     const handleTaskChange = () => {
       loadData();
@@ -83,6 +93,7 @@ export const StudentHomeworkPage: React.FC = () => {
     window.addEventListener('mahfaza:new_notification', handleTaskChange);
 
     return () => {
+      clearTimeout(safetyTimer);
       window.removeEventListener('mahfaza:task_created', handleTaskChange);
       window.removeEventListener('mahfaza:tasks_updated', handleTaskChange);
       window.removeEventListener('mahfaza:new_notification', handleTaskChange);
@@ -221,7 +232,8 @@ export const StudentHomeworkPage: React.FC = () => {
   const filteredItems = useMemo(() => {
     if (activeTab === 'all') return unifiedList;
     if (activeTab === 'pending') {
-      return unifiedList.filter((item) => item.status === 'pending' || item.status === 'pending_review');
+      // Any task or homework that has not been approved/completed belongs in Yapılacaklar (including overdue)
+      return unifiedList.filter((item) => !item.is_completed);
     }
     return unifiedList.filter((item) => item.status === activeTab);
   }, [unifiedList, activeTab]);
@@ -232,9 +244,11 @@ export const StudentHomeworkPage: React.FC = () => {
     let overdue = 0;
 
     unifiedList.forEach((item) => {
-      if (item.status === 'completed') completed++;
-      else if (item.status === 'overdue') overdue++;
-      else pending++;
+      if (item.is_completed) completed++;
+      else {
+        pending++;
+        if (item.is_overdue) overdue++;
+      }
     });
 
     return { all: unifiedList.length, pending, completed, overdue };

@@ -150,29 +150,36 @@ export const TeacherDashboardPage: React.FC = () => {
   const [targetSuccess, setTargetSuccess] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
     try {
-      setLoading(true);
-      const [cls, sched, hws, sessions, sub, studs] = await Promise.all([
-        academicService.getClasses(),
-        academicService.getMasterSchedule(undefined, user.id),
-        homeworkService.getHomeworks(),
-        attendanceService.getSessions(),
-        subscriptionService.getUserSubscription(user.id),
-        relationshipService.getProfilesByRole('student'),
-      ]);
-      setClasses(cls);
-      setSchedule(sched);
-      setHomeworks(hws.filter((h) => h.teacher_id === user.id || !h.teacher_id));
-      setRecentSessions(sessions.slice(0, 5));
-      setUserSubscription(sub);
-      setStudents(studs);
+      const fetchPromise = (async () => {
+        const [cls, sched, hws, sessions, sub, studs] = await Promise.all([
+          academicService.getClasses().catch(() => []),
+          academicService.getMasterSchedule(undefined, user.id).catch(() => []),
+          homeworkService.getHomeworks().catch(() => []),
+          attendanceService.getSessions().catch(() => []),
+          subscriptionService.getUserSubscription(user.id).catch(() => null),
+          relationshipService.getProfilesByRole('student').catch(() => []),
+        ]);
+        setClasses(cls || []);
+        setSchedule(sched || []);
+        setHomeworks((hws || []).filter((h) => h.teacher_id === user.id || !h.teacher_id));
+        setRecentSessions((sessions || []).slice(0, 5));
+        setUserSubscription(sub);
+        setStudents(studs || []);
 
-      if (studs.length > 0 && !selectedStudent) {
-        setSelectedStudent(studs[0]);
-      }
+        if (studs && studs.length > 0 && !selectedStudent) {
+          setSelectedStudent(studs[0]);
+        }
+      })();
+
+      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 2000));
+      await Promise.race([fetchPromise, timeoutPromise]);
     } catch (err) {
-      console.error('Error loading teacher data:', err);
+      console.warn('Notice loading teacher dashboard:', err);
     } finally {
       setLoading(false);
     }

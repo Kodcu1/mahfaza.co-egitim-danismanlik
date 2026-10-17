@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../../features/auth/AuthContext';
-import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { UserRole } from '../../types';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { MahfazaLogo } from '../../utils/logoConstants';
@@ -16,100 +16,134 @@ import {
   Target,
   BookOpen,
   Sparkles,
-  Info,
 } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { signIn, role } = useAuth();
+  const { signIn, loginLocally, isConfigured } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isServiceUnavailable, setIsServiceUnavailable] = useState(false);
   const passwordInputRef = useRef<HTMLInputElement>(null);
+
+  // Quick Demo Role Preview (Explicit, isolated demo bypass for interface exploration)
+  const handleQuickRoleLogin = (demoEmail: string, quickRole: UserRole) => {
+    setErrorMessage(null);
+    setIsServiceUnavailable(false);
+    setLoading(true);
+    try {
+      const res = loginLocally(demoEmail, quickRole);
+      const dest =
+        res.targetRole === 'admin'
+          ? '/admin/dashboard'
+          : `/${res.targetRole === 'head_coach' ? 'coach' : res.targetRole}/dashboard`;
+      navigate(dest, { replace: true });
+    } catch {
+      // Direct navigation fallback
+      navigate(quickRole === 'admin' ? '/admin/dashboard' : `/${quickRole}/dashboard`, { replace: true });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
+      setIsServiceUnavailable(false);
       setErrorMessage('Lütfen e-posta ve şifrenizi giriniz.');
       return;
     }
 
     setLoading(true);
     setErrorMessage(null);
+    setIsServiceUnavailable(false);
+
+    const cleanEmail = email.trim().toLowerCase();
 
     try {
-      const cleanEmail = email.trim().toLowerCase();
-      const { error, isAdmin } = await signIn(cleanEmail, password);
+      const { error, isAdmin, targetRole } = await signIn(cleanEmail, password);
 
       if (error) {
-        if (error.message.includes('Invalid login credentials')) {
+        const msg = (error.message || '').toLowerCase();
+        const errName = error.name || '';
+        const status = (error as any).status || (error as any).statusCode;
+
+        const isNetworkOrServiceError =
+          msg.includes('failed to fetch') ||
+          msg.includes('authretryablefetcherror') ||
+          msg.includes('network') ||
+          msg.includes('load failed') ||
+          msg.includes('timeout') ||
+          errName.includes('AuthRetryableFetchError') ||
+          errName === 'TypeError' ||
+          status === 502 ||
+          status === 503 ||
+          status === 504;
+
+        if (isNetworkOrServiceError) {
+          setIsServiceUnavailable(true);
           setErrorMessage(
-            'Giriş bilgileri hatalı. Lütfen e-posta adresinizi ve şifrenizi kontrol ediniz.'
+            'Kimlik doğrulama sunucusuna şu anda ulaşılamıyor. Bir süre sonra tekrar deneyin. Girdiğiniz bilgiler ve hesabınız korunur.'
           );
+        } else if (msg.includes('invalid login credentials')) {
+          setIsServiceUnavailable(false);
+          setErrorMessage('Giriş bilgileri hatalı. Lütfen e-posta adresinizi ve şifrenizi kontrol ediniz.');
+        } else if (msg.includes('email not confirmed')) {
+          setIsServiceUnavailable(false);
+          setErrorMessage('E-posta adresiniz henüz doğrulanmamış. Lütfen e-posta gelen kutunuzu kontrol ediniz.');
         } else {
+          setIsServiceUnavailable(false);
           setErrorMessage(error.message);
         }
-      } else {
-        // Successful login
-        const from = (location.state as any)?.from?.pathname;
-        if (from) {
-          navigate(from, { replace: true });
-          return;
-        }
-
-        // If admin role
-        if (
-          isAdmin ||
-          cleanEmail === 'admin@mahfaza.com' ||
-          cleanEmail === 'mudurdemo@mahfaza.com' ||
-          cleanEmail.includes('mudur')
-        ) {
-          navigate('/admin/dashboard', { replace: true });
-          return;
-        }
-
-        // Fetch current user profile role for instant accurate redirection
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        let targetRole = role || 'student';
-        if (user) {
-          const { data: prof } = await supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', user.id)
-            .maybeSingle();
-          if (prof?.role) targetRole = prof.role;
-        }
-        if (targetRole === 'admin') {
-          navigate('/admin/dashboard', { replace: true });
-        } else {
-          navigate(`/${targetRole === 'head_coach' ? 'coach' : targetRole}/dashboard`, { replace: true });
-        }
+        return;
       }
+
+      // Successful authentic login
+      const from = (location.state as any)?.from?.pathname;
+      if (from) {
+        navigate(from, { replace: true });
+        return;
+      }
+
+      const dest =
+        targetRole === 'admin' || isAdmin
+          ? '/admin/dashboard'
+          : `/${targetRole === 'head_coach' ? 'coach' : targetRole || 'student'}/dashboard`;
+      navigate(dest, { replace: true });
     } catch (err: any) {
-      if (err?.message?.includes('Failed to fetch') || err?.name === 'TypeError') {
+      const msg = (err?.message || '').toLowerCase();
+      const errName = err?.name || '';
+      const status = err?.status || err?.statusCode;
+
+      const isNetworkOrServiceError =
+        msg.includes('failed to fetch') ||
+        msg.includes('authretryablefetcherror') ||
+        msg.includes('network') ||
+        msg.includes('load failed') ||
+        msg.includes('timeout') ||
+        errName.includes('AuthRetryableFetchError') ||
+        errName === 'TypeError' ||
+        status === 502 ||
+        status === 503 ||
+        status === 504;
+
+      if (isNetworkOrServiceError) {
+        setIsServiceUnavailable(true);
         setErrorMessage(
-          'Supabase sunucusuna bağlanılamadı (Ağ hatası). Lütfen internet bağlantınızı kontrol ediniz.'
+          'Kimlik doğrulama sunucusuna şu anda ulaşılamıyor. Bir süre sonra tekrar deneyin. Girdiğiniz bilgiler ve hesabınız korunur.'
         );
       } else {
-        setErrorMessage(err.message || 'Giriş yapılırken beklenmedik bir hata oluştu.');
+        setIsServiceUnavailable(false);
+        setErrorMessage(
+          err?.message || 'Giriş işlemi sırasında bir hata oluştu. Lütfen tekrar deneyiniz.'
+        );
       }
     } finally {
       setLoading(false);
-    }
-  };
-
-  // Quick Demo Auto-Fill (Silently fills email, ready for password entry)
-  const handleQuickAvatarSelect = (demoEmail: string) => {
-    setEmail(demoEmail);
-    setPassword('');
-    setErrorMessage(null);
-    if (passwordInputRef.current) {
-      passwordInputRef.current.focus();
     }
   };
 
@@ -141,12 +175,22 @@ export const LoginPage: React.FC = () => {
           </p>
         </div>
 
-        {/* Circular / Rounded Quick Login Avatars Bar (STREAMLINED - NO DUPLICATES) */}
+        {/* Warning if Supabase config is missing */}
+        {!isConfigured && (
+          <div className="mb-4 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+            <span>
+              Supabase yapılandırması eksik (VITE_SUPABASE_URL veya VITE_SUPABASE_ANON_KEY tanımlanmamış).
+            </span>
+          </div>
+        )}
+
+        {/* Quick Demo Role Preview Bar */}
         <div className="mb-5 p-3 rounded-xl bg-slate-50/90 border border-slate-200/80">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
               <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              Hızlı Rol Seçimi (E-Posta Doldur)
+              Hızlı Önizleme (Demo Rolü — Veritabanı Bağımsız)
             </span>
           </div>
           <div className="grid grid-cols-4 gap-2 text-center">
@@ -154,9 +198,9 @@ export const LoginPage: React.FC = () => {
             <button
               type="button"
               disabled={loading}
-              onClick={() => handleQuickAvatarSelect('mudurdemo@mahfaza.com')}
+              onClick={() => handleQuickRoleLogin('mudurdemo@mahfaza.com', 'admin')}
               className="flex flex-col items-center gap-1 p-1.5 rounded-xl hover:bg-white hover:shadow-xs border border-transparent hover:border-amber-300 transition-all cursor-pointer group"
-              title="Kurum Müdürü e-postasını doldur"
+              title="Kurum Müdürü paneline anında giriş yap"
             >
               <div className="w-10 h-10 rounded-full bg-amber-500 text-white flex items-center justify-center shadow-xs group-hover:scale-105 group-hover:ring-2 group-hover:ring-amber-400/50 transition-all">
                 <Building2 className="w-5 h-5" />
@@ -169,9 +213,9 @@ export const LoginPage: React.FC = () => {
             <button
               type="button"
               disabled={loading}
-              onClick={() => handleQuickAvatarSelect('demo.koc@mahfaza.co')}
+              onClick={() => handleQuickRoleLogin('demo.koc@mahfaza.co', 'coach')}
               className="flex flex-col items-center gap-1 p-1.5 rounded-xl hover:bg-white hover:shadow-xs border border-transparent hover:border-indigo-300 transition-all cursor-pointer group"
-              title="Koç e-postasını doldur"
+              title="Koçluk paneline anında giriş yap"
             >
               <div className="w-10 h-10 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-xs group-hover:scale-105 group-hover:ring-2 group-hover:ring-indigo-400/50 transition-all">
                 <Target className="w-5 h-5" />
@@ -184,9 +228,9 @@ export const LoginPage: React.FC = () => {
             <button
               type="button"
               disabled={loading}
-              onClick={() => handleQuickAvatarSelect('demo.ogrenci@mahfaza.co')}
+              onClick={() => handleQuickRoleLogin('demo.ogrenci@mahfaza.co', 'student')}
               className="flex flex-col items-center gap-1 p-1.5 rounded-xl hover:bg-white hover:shadow-xs border border-transparent hover:border-emerald-300 transition-all cursor-pointer group"
-              title="Öğrenci e-postasını doldur"
+              title="Öğrenci paneline anında giriş yap"
             >
               <div className="w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center shadow-xs group-hover:scale-105 group-hover:ring-2 group-hover:ring-emerald-400/50 transition-all">
                 <GraduationCap className="w-5 h-5" />
@@ -199,9 +243,9 @@ export const LoginPage: React.FC = () => {
             <button
               type="button"
               disabled={loading}
-              onClick={() => handleQuickAvatarSelect('demo.ogretmen@mahfaza.co')}
+              onClick={() => handleQuickRoleLogin('demo.ogretmen@mahfaza.co', 'teacher')}
               className="flex flex-col items-center gap-1 p-1.5 rounded-xl hover:bg-white hover:shadow-xs border border-transparent hover:border-sky-300 transition-all cursor-pointer group"
-              title="Öğretmen e-postasını doldur"
+              title="Öğretmen paneline anında giriş yap"
             >
               <div className="w-10 h-10 rounded-full bg-sky-600 text-white flex items-center justify-center shadow-xs group-hover:scale-105 group-hover:ring-2 group-hover:ring-sky-400/50 transition-all">
                 <BookOpen className="w-5 h-5" />
@@ -212,23 +256,31 @@ export const LoginPage: React.FC = () => {
           </div>
         </div>
 
-        {!isSupabaseConfigured && (
-          <div className="mb-4 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex flex-col gap-1.5">
-            <div className="flex items-center gap-2 font-semibold text-amber-800">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>Supabase Bağlantısı Yapılandırılmadı</span>
-            </div>
-            <p className="text-[11px] text-slate-700 leading-relaxed">
-              Kimlik doğrulama ve veritabanı bağlantısı için <code className="text-amber-800 font-mono">.env</code> dosyasında <code className="text-amber-800 font-mono">VITE_SUPABASE_URL</code> ve <code className="text-amber-800 font-mono">VITE_SUPABASE_ANON_KEY</code> tanımlanmalıdır.
-            </p>
-          </div>
-        )}
-
         {errorMessage && (
-          <div className="mb-4 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-            <span className="font-semibold">{errorMessage}</span>
-          </div>
+          isServiceUnavailable ? (
+            <div
+              role="alert"
+              aria-live="assertive"
+              className="mb-4 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex flex-col gap-1.5 shadow-xs"
+            >
+              <div className="flex items-center gap-2 font-bold text-amber-950">
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+                <span className="text-[13px]">Hizmet Durumu</span>
+              </div>
+              <p className="text-amber-800 leading-relaxed pl-6 font-medium">
+                {errorMessage}
+              </p>
+            </div>
+          ) : (
+            <div
+              role="alert"
+              aria-live="polite"
+              className="mb-4 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2"
+            >
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span className="font-semibold">{errorMessage}</span>
+            </div>
+          )
         )}
 
         {/* Standard Form */}
@@ -239,7 +291,11 @@ export const LoginPage: React.FC = () => {
             required
             placeholder="ornek@mahfaza.co"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (errorMessage) setErrorMessage(null);
+              if (isServiceUnavailable) setIsServiceUnavailable(false);
+            }}
             leftIcon={<Mail className="w-4 h-4" />}
           />
 
@@ -259,7 +315,11 @@ export const LoginPage: React.FC = () => {
               required
               placeholder="••••••••"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (errorMessage) setErrorMessage(null);
+                if (isServiceUnavailable) setIsServiceUnavailable(false);
+              }}
               leftIcon={<Lock className="w-4 h-4" />}
             />
           </div>
@@ -292,7 +352,7 @@ export const LoginPage: React.FC = () => {
         <div className="mt-4 pt-3 border-t border-slate-100 text-center">
           <div className="flex items-center justify-center gap-1.5 text-slate-400 text-[11px]">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Mahfaza.co Güvenli Kimlik Doğrulama</span>
+            <span>Mahfaza.co Kesintisiz ve Güvenli Giriş</span>
           </div>
         </div>
       </div>

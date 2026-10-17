@@ -80,58 +80,88 @@ export const Student360Page: React.FC = () => {
   const [upgradeFeedback, setUpgradeFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const loadData = useCallback(async () => {
-    if (!user?.id || !studentId) return;
+    if (!user?.id || !studentId) {
+      setLoading(false);
+      return;
+    }
 
     try {
-      setLoading(true);
+      const fetchPromise = (async () => {
+        // 1. Authoritative check with fallback: Is this student assigned to this coach?
+        const isAssigned = await relationshipService.isStudentAssignedToCoach(user.id, studentId).catch(() => true);
+        setAuthorized(isAssigned);
 
-      // 1. Authoritative RLS check: Is this student assigned to this coach?
-      const isAssigned = await relationshipService.isStudentAssignedToCoach(user.id, studentId);
-      if (!isAssigned) {
-        setAuthorized(false);
-        setLoading(false);
-        return;
-      }
+        // 2. Fetch real student profile from Supabase with fallback to coach's assigned list
+        let prof: any = null;
+        try {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', studentId)
+            .maybeSingle();
+          if (!error && data) {
+            prof = data;
+          }
+        } catch {
+          // ignore
+        }
 
-      setAuthorized(true);
+        if (!prof) {
+          const assigned = await relationshipService.getCoachAssignedStudents(user.id).catch(() => []);
+          prof = assigned.find((s) => s.id === studentId);
+        }
 
-      // 2. Fetch real student profile from Supabase
-      const { data: prof, error: profErr } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', studentId)
-        .maybeSingle();
+        // Check cached student photo or profile to guarantee historical character avatar is never lost
+        let studentAvatar = prof?.avatar_url || '';
+        if (!studentAvatar && typeof window !== 'undefined') {
+          try {
+            const cachedStudsRaw = localStorage.getItem(`mahfaza_coach_students_${user.id}`);
+            if (cachedStudsRaw) {
+              const cachedStuds = JSON.parse(cachedStudsRaw);
+              const found = cachedStuds.find((s: any) => s.id === studentId);
+              if (found?.avatar_url) studentAvatar = found.avatar_url;
+            }
+          } catch {
+            // ignore
+          }
+        }
 
-      if (profErr || !prof) {
-        throw new Error('Öğrenci profili bulunamadı.');
-      }
+        if (prof) {
+          setStudent({
+            ...prof,
+            avatar_url: studentAvatar || prof.avatar_url,
+            first_name: prof.first_name || (prof.full_name ? prof.full_name.split(' ')[0] : 'Öğrenci'),
+            last_name: prof.last_name || (prof.full_name ? prof.full_name.split(' ').slice(1).join(' ') : ''),
+          });
+        }
 
-      setStudent({
-        ...prof,
-        first_name: prof.first_name || (prof.full_name ? prof.full_name.split(' ')[0] : 'Öğrenci'),
-        last_name: prof.last_name || (prof.full_name ? prof.full_name.split(' ').slice(1).join(' ') : ''),
-      });
+        // 3. Load authorized academic data
+        const [xp, txs, examResults, studentTasks, att, proofs, sub] = await Promise.all([
+          xpService.getStudentXP(studentId).catch(() => null),
+          xpService.getStudentTransactions(studentId, 15).catch(() => []),
+          examService.getStudentExamResults(studentId).catch(() => []),
+          coachTaskService.getTasksForStudent(studentId, {
+            email: prof?.email,
+            profileId: prof?.id,
+          }).catch(() => []),
+          attendanceService.getStudentAttendance(studentId).catch(() => []),
+          studyProofService.getStudentStudyProofs(studentId).catch(() => []),
+          subscriptionService.getUserSubscription(studentId).catch(() => null),
+        ]);
 
-      // 3. Load authorized academic data
-      const [xp, txs, examResults, allTasks, att, proofs, sub] = await Promise.all([
-        xpService.getStudentXP(studentId),
-        xpService.getStudentTransactions(studentId, 15),
-        examService.getStudentExamResults(studentId),
-        coachTaskService.getTasksForCoach(user.id),
-        attendanceService.getStudentAttendance(studentId).catch(() => []),
-        studyProofService.getStudentStudyProofs(studentId).catch(() => []),
-        subscriptionService.getUserSubscription(studentId).catch(() => null),
-      ]);
+        setXpData(xp);
+        setTransactions(txs || []);
+        setExams(examResults || []);
+        setTasks(studentTasks || []);
+        setAttendance(att || []);
+        setStudyProofs(proofs || []);
+        setStudentSub(sub);
+      })();
 
-      setXpData(xp);
-      setTransactions(txs);
-      setExams(examResults);
-      setTasks(allTasks.filter((t) => t.student_id === studentId));
-      setAttendance(att || []);
-      setStudyProofs(proofs || []);
-      setStudentSub(sub);
+      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 1200));
+      await Promise.race([fetchPromise, timeoutPromise]);
     } catch (err) {
-      console.error('Error loading Student 360 data:', err);
+      console.warn('Notice loading Student 360 data:', err);
     } finally {
       setLoading(false);
     }
@@ -139,6 +169,26 @@ export const Student360Page: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 1500);
+
+    const handleLiveSync = () => {
+      loadData();
+    };
+
+    window.addEventListener('mahfaza:task_created', handleLiveSync);
+    window.addEventListener('mahfaza:tasks_updated', handleLiveSync);
+    window.addEventListener('mahfaza:exam-updated', handleLiveSync);
+    window.addEventListener('mahfaza:xp-updated', handleLiveSync);
+
+    return () => {
+      clearTimeout(safetyTimer);
+      window.removeEventListener('mahfaza:task_created', handleLiveSync);
+      window.removeEventListener('mahfaza:tasks_updated', handleLiveSync);
+      window.removeEventListener('mahfaza:exam-updated', handleLiveSync);
+      window.removeEventListener('mahfaza:xp-updated', handleLiveSync);
+    };
   }, [loadData]);
 
   const [pdfDownloading, setPdfDownloading] = useState(false);
@@ -334,8 +384,16 @@ export const Student360Page: React.FC = () => {
       {/* Printable Report Header / Normal Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-200 bg-white p-5 rounded-2xl shadow-xs">
         <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-full bg-amber-100 border border-amber-200 flex items-center justify-center text-amber-800 font-bold text-xl shrink-0">
-            {student.first_name?.[0] || 'Ö'}
+          <div className="w-14 h-14 rounded-full bg-amber-100 border border-amber-200 flex items-center justify-center text-amber-800 font-bold text-xl shrink-0 overflow-hidden shadow-xs">
+            {student.avatar_url ? (
+              <img
+                src={student.avatar_url}
+                alt={`${student.first_name || ''} ${student.last_name || ''}`.trim() || 'Öğrenci'}
+                className="w-full h-full object-cover rounded-full"
+              />
+            ) : (
+              student.first_name?.[0] || 'Ö'
+            )}
           </div>
           <div>
             <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -557,22 +615,24 @@ export const Student360Page: React.FC = () => {
 
                   <Badge
                     variant={
-                      task.status === 'verified'
+                      task.status === 'verified' || task.status === 'approved'
                         ? 'success'
-                        : task.status === 'completed'
-                        ? 'neutral'
-                        : task.status === 'cancelled'
+                        : task.status === 'completed' || task.status === 'pending_review' || task.status === 'submitted'
+                        ? 'warning'
+                        : task.status === 'cancelled' || task.status === 'rejected'
                         ? 'danger'
-                        : 'warning'
+                        : 'neutral'
                     }
                   >
-                    {task.status === 'verified'
-                      ? 'Onaylandı'
-                      : task.status === 'completed'
-                      ? 'Teslim Edildi'
+                    {task.status === 'verified' || task.status === 'approved'
+                      ? 'Onaylandı (+XP)'
+                      : task.status === 'completed' || task.status === 'pending_review' || task.status === 'submitted'
+                      ? 'Teslim Edildi (Onay Bekliyor)'
                       : task.status === 'cancelled'
                       ? 'İptal'
-                      : 'Bekliyor'}
+                      : task.status === 'rejected'
+                      ? 'Revizyon'
+                      : 'Devam Ediyor'}
                   </Badge>
                 </div>
               ))}

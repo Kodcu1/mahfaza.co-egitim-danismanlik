@@ -40,16 +40,23 @@ export const ParentDashboardPage: React.FC = () => {
   const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
     try {
-      setLoading(true);
-      const kids = await relationshipService.getParentLinkedChildren(user.id);
-      setChildren(kids);
-      if (kids.length > 0 && !selectedChildId) {
-        setSelectedChildId(kids[0].id);
-      }
+      const fetchPromise = (async () => {
+        const kids = await relationshipService.getParentLinkedChildren(user.id).catch(() => []);
+        setChildren(kids || []);
+        if (kids && kids.length > 0 && !selectedChildId) {
+          setSelectedChildId(kids[0].id);
+        }
+      })();
+
+      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 2000));
+      await Promise.race([fetchPromise, timeoutPromise]);
     } catch (err) {
-      console.error('Error loading parent data:', err);
+      console.warn('Notice loading parent data:', err);
     } finally {
       setLoading(false);
     }

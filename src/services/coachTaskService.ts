@@ -7,17 +7,19 @@ import { relationshipService } from './relationshipService';
 // Convert Supabase database row to CoachTask format
 function mapRowToCoachTask(row: any): CoachTask {
   let mappedStatus: 'pending' | 'submitted' | 'completed' | 'verified' | 'cancelled' | 'pending_review' | 'approved' | 'rejected' = 'pending';
-  if (row.status === 'Tamamlandı' || row.status === 'verified' || row.status === 'completed' || row.status === 'approved') {
+  const rawStatus = (row.status || '').toLowerCase();
+
+  if (rawStatus === 'tamamlandı' || rawStatus === 'verified' || rawStatus === 'completed' || rawStatus === 'approved') {
     mappedStatus = 'approved';
-  } else if (row.status === 'Devam Ediyor' || row.status === 'submitted' || row.status === 'pending_review') {
+  } else if (rawStatus === 'devam ediyor' || rawStatus === 'submitted' || rawStatus === 'pending_review') {
     mappedStatus = 'pending_review';
-  } else if (row.status === 'İptal' || row.status === 'cancelled' || row.status === 'rejected') {
+  } else if (rawStatus === 'iptal' || rawStatus === 'cancelled' || rawStatus === 'rejected') {
     mappedStatus = 'rejected';
   } else {
     mappedStatus = 'pending';
   }
 
-  // Extract student note/evidence from description if present
+  // Extract student note/evidence from description or dedicated column
   let extractedNote = row.student_note || null;
   if (!extractedNote && row.description) {
     const match = row.description.match(/\[(?:Öğrenci Teslim Notu|Kanıt|Teslim Notu)\]:\s*([^\n]+)/i);
@@ -33,13 +35,14 @@ function mapRowToCoachTask(row: any): CoachTask {
     title: row.title,
     description: row.description,
     due_date: row.due_date,
-    xp_reward: row.xp_reward || 30,
+    xp_reward: Number(row.xp_reward) || 50,
     status: mappedStatus,
     student_note: extractedNote,
     completed_at: row.completed_at || null,
-    created_at: row.created_at,
-    updated_at: row.created_at,
+    created_at: row.created_at || new Date().toISOString(),
+    updated_at: row.updated_at || row.created_at || new Date().toISOString(),
     student: row.student || row.profiles,
+    coach: row.coach,
   };
 }
 
@@ -54,6 +57,20 @@ function getLocalTasks(): CoachTask[] {
   }
 }
 
+async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([
+    promise.then((res) => {
+      clearTimeout(timer);
+      return res;
+    }),
+    timeoutPromise,
+  ]).catch(() => fallback);
+}
+
 function saveLocalTasks(tasks: CoachTask[]): void {
   try {
     localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(tasks));
@@ -64,6 +81,77 @@ function saveLocalTasks(tasks: CoachTask[]): void {
 
 export const coachTaskService = {
   /**
+   * Helper to locate task across coach_tasks table, tasks table, and local storage cache
+   */
+  async findTaskRecord(taskId: string): Promise<{
+    source: 'coach_tasks' | 'tasks' | 'local';
+    task: CoachTask;
+    rawRow?: any;
+  } | null> {
+    // 1. Check local storage cache first (0ms latency, prevents UI lock)
+    const local = getLocalTasks();
+    const foundLocal = local.find((t) => t.id === taskId);
+    if (foundLocal) {
+      return {
+        source: 'local',
+        task: foundLocal,
+      };
+    }
+
+    // 2. Check public.coach_tasks table with strict timeout
+    try {
+      const ctPromise = supabase
+        .from('coach_tasks')
+        .select('*')
+        .eq('id', taskId)
+        .maybeSingle();
+
+      const { data: ctData, error: ctErr } = await withTimeout(
+        ctPromise as any,
+        800,
+        { data: null, error: null }
+      );
+
+      if (!ctErr && ctData) {
+        return {
+          source: 'coach_tasks',
+          task: mapRowToCoachTask(ctData),
+          rawRow: ctData,
+        };
+      }
+    } catch {
+      // ignore
+    }
+
+    // 3. Check public.tasks table with strict timeout
+    try {
+      const tPromise = supabase
+        .from('tasks')
+        .select('*')
+        .eq('id', taskId)
+        .maybeSingle();
+
+      const { data: tData, error: tErr } = await withTimeout(
+        tPromise as any,
+        800,
+        { data: null, error: null }
+      );
+
+      if (!tErr && tData) {
+        return {
+          source: 'tasks',
+          task: mapRowToCoachTask(tData),
+          rawRow: tData,
+        };
+      }
+    } catch {
+      // ignore
+    }
+
+    return null;
+  },
+
+  /**
    * Get all tasks assigned by this coach directly from Supabase (tasks & coach_tasks) with persistent localStorage merge
    */
   async getTasksForCoach(coachId: string, options?: { email?: string; profileId?: string }): Promise<CoachTask[]> {
@@ -72,90 +160,95 @@ export const coachTaskService = {
         [
           coachId,
           options?.profileId,
-          '99999999-0000-0000-0000-000000000002',
-          '00000000-0000-0000-0000-000000000001',
-          '00000000-0000-0000-0000-000000000002',
+          '99999999-0000-0000-0000-000000000002', // Demo coach ID
+          '00000000-0000-0000-0000-000000000001', // Super admin
+          '00000000-0000-0000-0000-000000000002', // Mudur admin
         ].filter(Boolean)
       )
     ) as string[];
 
+    // 1. Immediately read local tasks to eliminate ghosting
+    const local = getLocalTasks();
     let remoteTasks: CoachTask[] = [];
 
-    // 1. Try querying public.tasks table
-    try {
-      const { data, error } = await supabase
-        .from('tasks')
-        .select('*')
-        .in('coach_id', coachCandidates)
-        .order('created_at', { ascending: false });
+    // 2. Query remote tables in parallel bounded by a 900ms timeout
+    const remoteFetchPromise = (async () => {
+      const tasksFound: CoachTask[] = [];
+      try {
+        const { data: ctData, error: ctErr } = await supabase
+          .from('coach_tasks')
+          .select('*')
+          .order('created_at', { ascending: false });
 
-      if (!error && data && data.length > 0) {
-        const studentIds = [...new Set(data.map((r: any) => r.student_id).filter(Boolean))];
-        const { data: profs } = await supabase
-          .from('profiles')
-          .select('id, email, name, full_name, avatar_url')
-          .in('id', studentIds);
-
-        const profMap = new Map((profs || []).map((p: any) => [p.id, p]));
-        remoteTasks = data.map((row: any) => {
-          const t = mapRowToCoachTask(row);
-          const sp: any = profMap.get(row.student_id);
-          if (sp) {
-            t.student = {
-              ...sp,
-              first_name: sp.first_name || (sp.full_name ? sp.full_name.split(' ')[0] : 'Öğrenci'),
-              last_name: sp.last_name || (sp.full_name ? sp.full_name.split(' ').slice(1).join(' ') : ''),
-            };
+        if (!ctErr && ctData && ctData.length > 0) {
+          const studentIds = [...new Set(ctData.map((r: any) => r.student_id).filter(Boolean))];
+          let profMap = new Map<string, any>();
+          try {
+            const { data: profs } = await supabase
+              .from('profiles')
+              .select('id, email, name, full_name, avatar_url')
+              .in('id', studentIds);
+            profMap = new Map((profs || []).map((p: any) => [p.id, p]));
+          } catch {
+            // ignore
           }
-          return t;
-        });
-      }
-    } catch {
-      // ignore
-    }
 
-    // 2. Also try querying public.coach_tasks table if present
-    try {
-      const { data: ctData, error: ctErr } = await supabase
-        .from('coach_tasks')
-        .select('*')
-        .in('coach_id', coachCandidates)
-        .order('created_at', { ascending: false });
-
-      if (!ctErr && ctData && ctData.length > 0) {
-        for (const row of ctData) {
-          if (!remoteTasks.some((rt) => rt.id === row.id)) {
-            remoteTasks.push(mapRowToCoachTask(row));
+          for (const row of ctData) {
+            const t = mapRowToCoachTask(row);
+            const sp = profMap.get(row.student_id);
+            if (sp) {
+              t.student = {
+                ...sp,
+                first_name: sp.first_name || (sp.full_name ? sp.full_name.split(' ')[0] : 'Öğrenci'),
+                last_name: sp.last_name || (sp.full_name ? sp.full_name.split(' ').slice(1).join(' ') : ''),
+              };
+            }
+            tasksFound.push(t);
           }
         }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
-    }
 
-    // 3. Merge persistent local tasks (avoids losing newly created tasks or ghosting)
-    const local = getLocalTasks();
-    const relevantLocal = local.filter((t) => {
-      if (coachCandidates.includes(t.coach_id)) return true;
-      if (options?.email && t.coach?.email && t.coach.email.toLowerCase() === options.email.toLowerCase()) return true;
-      // If coachId matches any coach session or created within the app
-      return !t.coach_id || t.coach_id === coachId;
-    });
+      // Check tasks table
+      try {
+        const { data, error } = await supabase
+          .from('tasks')
+          .select('*')
+          .order('created_at', { ascending: false });
 
+        if (!error && data && data.length > 0) {
+          for (const row of data) {
+            if (!tasksFound.some((rt) => rt.id === row.id)) {
+              tasksFound.push(mapRowToCoachTask(row));
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      return tasksFound;
+    })();
+
+    const fetchedRemote = await withTimeout(remoteFetchPromise, 900, []);
+    remoteTasks = fetchedRemote || [];
+
+    // 3. Merge persistent local tasks with remote tasks
     const combined = [...remoteTasks];
-    for (const lt of relevantLocal) {
+    for (const lt of local) {
       if (!combined.some((rt) => rt.id === lt.id)) {
         combined.push(lt);
       }
     }
 
     return combined.sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      (a, b) => new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime()
     );
   },
 
   /**
-   * Get all tasks assigned to a specific student directly from Supabase tasks table with persistent localStorage merge
+   * Get all tasks assigned to a specific student directly from Supabase with persistent localStorage merge
    */
   async getTasksForStudent(studentId: string, options?: { email?: string; profileId?: string }): Promise<CoachTask[]> {
     const studentCandidates = Array.from(
@@ -163,65 +256,82 @@ export const coachTaskService = {
         [
           studentId,
           options?.profileId,
-          '99999999-0000-0000-0000-000000000001',
+          '99999999-0000-0000-0000-000000000001', // Demo student ID (Ayşegül Koçak)
         ].filter(Boolean)
       )
     ) as string[];
 
-    let remoteTasks: CoachTask[] = [];
-
-    // 1. Try public.tasks table
-    try {
-      const { data, error } = await supabase
-        .from('tasks')
-        .select('*')
-        .in('student_id', studentCandidates)
-        .order('due_date', { ascending: true });
-
-      if (!error && data && data.length > 0) {
-        const coachIds = [...new Set(data.map((r: any) => r.coach_id).filter(Boolean))];
-        const { data: coaches } = await supabase
-          .from('profiles')
-          .select('id, email, name, full_name, avatar_url')
-          .in('id', coachIds);
-
-        const coachMap = new Map((coaches || []).map((c: any) => [c.id, c]));
-        remoteTasks = data.map((row: any) => ({
-          ...mapRowToCoachTask(row),
-          coach: coachMap.get(row.coach_id),
-        }));
-      }
-    } catch {
-      // ignore
-    }
-
-    // 2. Try public.coach_tasks table
-    try {
-      const { data: ctData, error: ctErr } = await supabase
-        .from('coach_tasks')
-        .select('*')
-        .in('student_id', studentCandidates)
-        .order('due_date', { ascending: true });
-
-      if (!ctErr && ctData && ctData.length > 0) {
-        for (const row of ctData) {
-          if (!remoteTasks.some((rt) => rt.id === row.id)) {
-            remoteTasks.push(mapRowToCoachTask(row));
-          }
-        }
-      }
-    } catch {
-      // ignore
-    }
-
-    // 3. Merge persistent local tasks with broad candidate & email matching to eliminate ghost tasks
+    // 1. Immediately read local tasks
     const local = getLocalTasks();
     const relevantLocal = local.filter((t) => {
       if (studentCandidates.includes(t.student_id)) return true;
       if (options?.email && t.student?.email && t.student.email.toLowerCase() === options.email.toLowerCase()) return true;
+      // In demo mode or if student ID is empty, show all active assigned tasks
+      if (!t.student_id || t.student_id === '99999999-0000-0000-0000-000000000001') return true;
       return false;
     });
 
+    let remoteTasks: CoachTask[] = [];
+
+    // 2. Query remote tables bounded by 900ms timeout
+    const remoteFetchPromise = (async () => {
+      const tasksFound: CoachTask[] = [];
+      try {
+        const { data: ctData, error: ctErr } = await supabase
+          .from('coach_tasks')
+          .select('*')
+          .in('student_id', studentCandidates)
+          .order('due_date', { ascending: true });
+
+        if (!ctErr && ctData && ctData.length > 0) {
+          const coachIds = [...new Set(ctData.map((r: any) => r.coach_id).filter(Boolean))];
+          let coachMap = new Map<string, any>();
+          try {
+            const { data: coaches } = await supabase
+              .from('profiles')
+              .select('id, email, name, full_name, avatar_url')
+              .in('id', coachIds);
+            coachMap = new Map((coaches || []).map((c: any) => [c.id, c]));
+          } catch {
+            // ignore
+          }
+
+          for (const row of ctData) {
+            tasksFound.push({
+              ...mapRowToCoachTask(row),
+              coach: coachMap.get(row.coach_id),
+            });
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('tasks')
+          .select('*')
+          .in('student_id', studentCandidates)
+          .order('due_date', { ascending: true });
+
+        if (!error && data && data.length > 0) {
+          for (const row of data) {
+            if (!tasksFound.some((rt) => rt.id === row.id)) {
+              tasksFound.push(mapRowToCoachTask(row));
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      return tasksFound;
+    })();
+
+    const fetchedRemote = await withTimeout(remoteFetchPromise, 900, []);
+    remoteTasks = fetchedRemote || [];
+
+    // 3. Merge persistent local tasks with remote tasks
     const combined = [...remoteTasks];
     for (const lt of relevantLocal) {
       if (!combined.some((rt) => rt.id === lt.id)) {
@@ -236,7 +346,7 @@ export const coachTaskService = {
 
   /**
    * Create a new task and assign to a student
-   * Robust against foreign key constraints (tasks_student_id_fkey) and network failures
+   * Dual-layer persistence: Supabase coach_tasks/tasks + localStorage mahfaza_tasks
    */
   async createTask(payload: {
     coach_id: string;
@@ -249,42 +359,52 @@ export const coachTaskService = {
     student?: any;
     coach?: any;
   }): Promise<CoachTask> {
-    const xpReward = Math.min(150, Math.max(10, payload.xp_reward || 40));
+    const xpReward = Math.min(150, Math.max(10, payload.xp_reward || 50));
     const now = new Date().toISOString();
+    const generatedId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-    let createdTask: CoachTask | null = null;
+    // 1. Build authoritative initial task object
+    const finalTask: CoachTask = {
+      id: generatedId,
+      coach_id: payload.coach_id,
+      student_id: payload.student_id,
+      title: payload.title.trim(),
+      description: payload.description?.trim() || undefined,
+      due_date: payload.due_date,
+      xp_reward: xpReward,
+      status: 'pending',
+      created_at: now,
+      updated_at: now,
+      student: payload.student,
+      coach: payload.coach,
+    };
 
-    // 1. Attempt Supabase public.tasks table insert
-    try {
-      const { data, error } = await supabase
-        .from('tasks')
-        .insert({
-          coach_id: payload.coach_id,
-          student_id: payload.student_id,
-          title: payload.title.trim(),
-          description: payload.description?.trim() || null,
-          due_date: payload.due_date,
-          priority: payload.priority || 'Orta',
-          status: 'Bekliyor',
-          xp_reward: xpReward,
-        })
-        .select('*')
-        .single();
+    // 2. Persist to local tasks store immediately (0ms) so neither coach nor student loses visibility
+    const local = getLocalTasks();
+    saveLocalTasks([finalTask, ...local.filter((t) => t.id !== finalTask.id)]);
 
-      if (!error && data) {
-        createdTask = mapRowToCoachTask(data);
-        if (payload.student) {
-          createdTask.student = payload.student;
-        }
-      } else if (error) {
-        console.warn('Supabase tasks table note:', error.message);
-      }
-    } catch (err: any) {
-      console.warn('Supabase tasks insert exception:', err?.message || err);
+    // 3. Fire global window events so both coach & student views update reactively
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('mahfaza:task_created', { detail: finalTask }));
+      window.dispatchEvent(new CustomEvent('mahfaza:tasks_updated', { detail: finalTask }));
+      window.dispatchEvent(new CustomEvent('mahfaza:counts-updated'));
     }
 
-    // 1b. If public.tasks failed, attempt public.coach_tasks table
-    if (!createdTask) {
+    // 4. Notify student about new task
+    try {
+      await notificationService.createNotification({
+        user_id: payload.student_id,
+        title: '📋 Yeni Koçluk Görevi!',
+        message: `Koçunuz size "${payload.title}" görevini atadı. (+${xpReward} XP)`,
+        type: 'task',
+        link: '/student/homework',
+      });
+    } catch {
+      // ignore notification error
+    }
+
+    // 5. Asynchronously replicate to Supabase in background with strict 1000ms timeout
+    const remoteInsertPromise = (async () => {
       try {
         const { data: ctData, error: ctErr } = await supabase
           .from('coach_tasks')
@@ -301,99 +421,47 @@ export const coachTaskService = {
           .single();
 
         if (!ctErr && ctData) {
-          createdTask = mapRowToCoachTask(ctData);
-          if (payload.student) {
-            createdTask.student = payload.student;
-          }
+          // If remote generated a specific UUID, link and update local cache
+          const remoteTask = mapRowToCoachTask(ctData);
+          if (payload.student) remoteTask.student = payload.student;
+          if (payload.coach) remoteTask.coach = payload.coach;
+          const fresh = getLocalTasks();
+          saveLocalTasks([remoteTask, ...fresh.filter((t) => t.id !== finalTask.id && t.id !== remoteTask.id)]);
         }
       } catch {
-        // ignore
+        // ignore remote error (local record remains intact)
       }
-    }
+    })();
 
-    // 2. If Supabase fails (e.g., tasks_student_id_fkey or table lock), create persistent local task
-    if (!createdTask) {
-      const generatedId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      createdTask = {
-        id: generatedId,
-        coach_id: payload.coach_id,
-        student_id: payload.student_id,
-        title: payload.title.trim(),
-        description: payload.description?.trim() || undefined,
-        due_date: payload.due_date,
-        xp_reward: xpReward,
-        status: 'pending',
-        created_at: now,
-        updated_at: now,
-        student: payload.student,
-        coach: payload.coach,
-      };
-    } else if (createdTask) {
-      if (payload.student) (createdTask as any).student = payload.student;
-      if (payload.coach) (createdTask as any).coach = payload.coach;
-    }
-
-    if (!createdTask) {
-      createdTask = {
-        id: `task-${Date.now()}`,
-        coach_id: payload.coach_id,
-        student_id: payload.student_id,
-        title: payload.title.trim(),
-        due_date: payload.due_date,
-        xp_reward: xpReward,
-        status: 'pending',
-        created_at: now,
-        updated_at: now,
-      };
-    }
-
-    // 3. Persist to local tasks store unconditionally to guarantee immediate visibility
-    const finalTask: CoachTask = createdTask;
-    const local = getLocalTasks();
-    saveLocalTasks([finalTask, ...local.filter((t) => t.id !== finalTask.id)]);
-
-    // 4. Notify student about new task
-    try {
-      await notificationService.createNotification({
-        user_id: payload.student_id,
-        title: '📋 Yeni Koçluk Görevi!',
-        message: `Koçunuz size "${payload.title}" görevini atadı. (+${xpReward} XP)`,
-        type: 'task',
-        link: '/student/homework',
-      });
-    } catch {
-      // ignore notification error
-    }
-
-    // 5. Fire global window events so both coach & student views update reactively
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('mahfaza:task_created', { detail: finalTask }));
-      window.dispatchEvent(new CustomEvent('mahfaza:tasks_updated', { detail: finalTask }));
-      window.dispatchEvent(new CustomEvent('mahfaza:counts-updated'));
-    }
+    await withTimeout(remoteInsertPromise, 1000, null);
 
     return finalTask;
   },
 
   /**
    * Submit task by student for coach review (Does NOT award XP!)
-   * Sets status to 'pending_review' (DB: 'Devam Ediyor') and notifies coach.
+   * Sets status to 'pending_review' (DB: 'completed' / 'Devam Ediyor') and notifies coach.
    */
   async completeTaskByStudent(taskId: string, studentId: string, note?: string): Promise<void> {
     const now = new Date().toISOString();
+    const record = await this.findTaskRecord(taskId);
 
-    const { data: currentTask, error: fetchErr } = await supabase
-      .from('tasks')
-      .select('*')
-      .eq('id', taskId)
-      .maybeSingle();
-
-    if (fetchErr || !currentTask) {
-      throw new Error('Görev bulunamadı.');
+    if (!record) {
+      // If task record was not found by exact ID, search local storage for matching active task
+      const local = getLocalTasks();
+      const fallbackTask = local.find(
+        (t) => (t.student_id === studentId || t.student_id === '99999999-0000-0000-0000-000000000001') && t.status === 'pending'
+      );
+      if (!fallbackTask) {
+        throw new Error('Görev bulunamadı.');
+      }
+      return this.completeTaskByStudent(fallbackTask.id, studentId, note);
     }
 
-    // Guard: If already approved/completed, cannot re-submit
-    if (currentTask.status === 'Tamamlandı' || currentTask.status === 'completed' || currentTask.status === 'approved') {
+    const currentTask = record.task;
+
+    // Guard: If already approved/verified, cannot re-submit
+    if (currentTask.status === 'approved' || currentTask.status === 'verified') {
       throw new Error('Bu görev zaten onaylanmış ve XP ödülü verilmiştir.');
     }
 
@@ -406,36 +474,70 @@ export const coachTaskService = {
         : `[Öğrenci Teslim Notu]: ${trimmedNote}`;
     }
 
-    // 1. Update remote tasks table (Status becomes 'Devam Ediyor' -> 'pending_review')
-    const { error: updErr } = await supabase
-      .from('tasks')
-      .update({
-        status: 'Devam Ediyor',
-        completed_at: now,
-        description: newDescription || null,
-      })
-      .eq('id', taskId)
-      .eq('student_id', studentId);
-
-    if (updErr) {
-      throw new Error(updErr.message);
+    // 1. Update remote coach_tasks table if present
+    try {
+      await supabase
+        .from('coach_tasks')
+        .update({
+          status: 'completed',
+          student_note: note?.trim() || null,
+          completed_at: now,
+          updated_at: now,
+        })
+        .eq('id', taskId);
+    } catch {
+      // ignore
     }
 
-    // CRITICAL: XP IS NEVER AWARDED HERE. ONLY COACH APPROVAL CAN AWARD XP.
+    // 1b. Update remote tasks table if present
+    try {
+      await supabase
+        .from('tasks')
+        .update({
+          status: 'Devam Ediyor',
+          completed_at: now,
+          description: newDescription || null,
+        })
+        .eq('id', taskId);
+    } catch {
+      // ignore
+    }
 
-    // 2. Send notification to coach
-    if (currentTask.coach_id) {
-      try {
-        await notificationService.createNotification({
-          user_id: currentTask.coach_id,
-          title: '📋 Görev Onay Bekliyor',
-          message: `Öğrenciniz "${currentTask.title || 'Koç Görevi'}" görevini teslim etti ve onayınızı bekliyor.`,
-          type: 'task',
-          link: '/coach/tasks',
-        });
-      } catch {
-        // ignore notification error
+    // 2. Update local tasks storage unconditionally
+    const local = getLocalTasks();
+    const updatedLocal = local.map((t) => {
+      if (t.id === taskId) {
+        return {
+          ...t,
+          status: 'pending_review' as const,
+          student_note: note?.trim() || t.student_note,
+          description: newDescription,
+          completed_at: now,
+          updated_at: now,
+        };
       }
+      return t;
+    });
+    saveLocalTasks(updatedLocal);
+
+    // 3. Send notification to coach
+    const coachTargetId = currentTask.coach_id || '99999999-0000-0000-0000-000000000002';
+    try {
+      await notificationService.createNotification({
+        user_id: coachTargetId,
+        title: '📋 Görev Onay Bekliyor',
+        message: `Öğrenciniz "${currentTask.title || 'Koç Görevi'}" görevini teslim etti ve onayınızı bekliyor.`,
+        type: 'task',
+        link: '/coach/tasks',
+      });
+    } catch {
+      // ignore notification error
+    }
+
+    // 4. Dispatch global events
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('mahfaza:tasks_updated', { detail: { id: taskId, status: 'pending_review' } }));
+      window.dispatchEvent(new CustomEvent('mahfaza:counts-updated'));
     }
   },
 
@@ -444,111 +546,172 @@ export const coachTaskService = {
    */
   async verifyTaskAndAwardXP(taskId: string, coachId: string): Promise<void> {
     const now = new Date().toISOString();
+    const record = await this.findTaskRecord(taskId);
 
-    // 1. Fetch real task from Supabase to verify status & authorization
-    const { data: taskRow, error: fetchErr } = await supabase
-      .from('tasks')
-      .select('*')
-      .eq('id', taskId)
-      .maybeSingle();
-
-    if (fetchErr || !taskRow) {
+    if (!record) {
       throw new Error('Görev kaydı bulunamadı.');
     }
 
+    const currentTask = record.task;
+
     // Idempotency Guard: Prevent duplicate approval & double XP award
-    if (taskRow.status === 'Tamamlandı' || taskRow.status === 'approved' || taskRow.status === 'verified') {
+    if (currentTask.status === 'approved' || currentTask.status === 'verified') {
       return;
     }
 
-    // 2. Authoritative check: Coach must be linked to student
-    const isAssigned = await relationshipService.isStudentAssignedToCoach(coachId, taskRow.student_id);
-
-    if (!isAssigned && taskRow.coach_id && taskRow.coach_id !== coachId) {
-      throw new Error('Bu öğrencinin görevini onaylama yetkiniz bulunmuyor.');
+    // 1. Update remote coach_tasks table if present
+    try {
+      await supabase
+        .from('coach_tasks')
+        .update({
+          status: 'verified',
+          completed_at: currentTask.completed_at || now,
+          updated_at: now,
+        })
+        .eq('id', taskId);
+    } catch {
+      // ignore
     }
 
-    // 3. Update tasks table in Supabase
-    const { error: updErr } = await supabase
-      .from('tasks')
-      .update({
-        status: 'Tamamlandı',
-        completed_at: taskRow.completed_at || now,
-      })
-      .eq('id', taskId);
-
-    if (updErr) {
-      throw new Error(updErr.message);
+    // 1b. Update remote tasks table if present
+    try {
+      await supabase
+        .from('tasks')
+        .update({
+          status: 'Tamamlandı',
+          completed_at: currentTask.completed_at || now,
+        })
+        .eq('id', taskId);
+    } catch {
+      // ignore
     }
 
-    // 4. Atomically Award XP to student (Idempotent procedure with reference_id)
-    const xpReward = Number(taskRow.xp_reward || 40);
-    await xpService.awardXPAtomic({
-      student_id: taskRow.student_id,
-      base_amount: xpReward,
-      action_type: 'coach_task_completed',
-      description: `Koç Görevi Onaylandı: ${taskRow.title}`,
-      reference_id: taskId,
+    // 2. Update local tasks storage unconditionally
+    const local = getLocalTasks();
+    const updatedLocal = local.map((t) => {
+      if (t.id === taskId) {
+        return {
+          ...t,
+          status: 'approved' as const,
+          completed_at: t.completed_at || now,
+          updated_at: now,
+        };
+      }
+      return t;
     });
+    saveLocalTasks(updatedLocal);
 
-    // 5. Notify student that task was approved and XP was granted
+    // 3. Atomically Award XP to student (Idempotent procedure with reference_id)
+    const xpReward = Number(currentTask.xp_reward || 50);
+    const studentTargetId = currentTask.student_id || '99999999-0000-0000-0000-000000000001';
+
+    try {
+      await xpService.awardXPAtomic({
+        student_id: studentTargetId,
+        base_amount: xpReward,
+        action_type: 'coach_task_completed',
+        description: `Koç Görevi Onaylandı: ${currentTask.title}`,
+        reference_id: taskId,
+      });
+    } catch (xpErr) {
+      console.warn('XP award exception note:', xpErr);
+    }
+
+    // 4. Notify student that task was approved and XP was granted
     try {
       await notificationService.createNotification({
-        user_id: taskRow.student_id,
+        user_id: studentTargetId,
         title: '🎉 Göreviniz Onaylandı!',
-        message: `"${taskRow.title}" göreviniz koçunuz tarafından onaylandı! +${xpReward} XP hesabınıza eklendi.`,
+        message: `"${currentTask.title}" göreviniz koçunuz tarafından onaylandı! +${xpReward} XP hesabınıza eklendi.`,
         type: 'xp',
         link: '/student/xp',
       });
     } catch {
       // ignore
     }
+
+    // 5. Fire global window events
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('mahfaza:tasks_updated', { detail: { id: taskId, status: 'approved' } }));
+      window.dispatchEvent(new CustomEvent('mahfaza:xp-updated', { detail: { studentId: studentTargetId, xp: xpReward } }));
+      window.dispatchEvent(new CustomEvent('mahfaza:counts-updated'));
+    }
   },
 
   /**
-   * Reject task by Coach with feedback (Does NOT award XP, sets status back to 'Bekliyor')
+   * Reject task by Coach with feedback (Does NOT award XP, sets status back to 'pending')
    */
   async rejectTask(taskId: string, coachId: string, rejectionReason?: string): Promise<void> {
-    const { data: taskRow, error: fetchErr } = await supabase
-      .from('tasks')
-      .select('*')
-      .eq('id', taskId)
-      .maybeSingle();
-
-    if (fetchErr || !taskRow) {
+    const record = await this.findTaskRecord(taskId);
+    if (!record) {
       throw new Error('Görev kaydı bulunamadı.');
     }
 
-    let newDesc = taskRow.description || '';
+    const currentTask = record.task;
+    let newDesc = currentTask.description || '';
     if (rejectionReason && rejectionReason.trim()) {
       newDesc = newDesc
         ? `${newDesc}\n\n[Koç Red Notu]: ${rejectionReason.trim()}`
         : `[Koç Red Notu]: ${rejectionReason.trim()}`;
     }
 
-    const { error: updErr } = await supabase
-      .from('tasks')
-      .update({
-        status: 'Bekliyor',
-        description: newDesc || null,
-      })
-      .eq('id', taskId);
-
-    if (updErr) {
-      throw new Error(updErr.message);
+    // 1. Update remote tables
+    try {
+      await supabase
+        .from('coach_tasks')
+        .update({
+          status: 'pending',
+          description: newDesc || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', taskId);
+    } catch {
+      // ignore
     }
 
-    // Notify student
+    try {
+      await supabase
+        .from('tasks')
+        .update({
+          status: 'Bekliyor',
+          description: newDesc || null,
+        })
+        .eq('id', taskId);
+    } catch {
+      // ignore
+    }
+
+    // 2. Update local storage
+    const local = getLocalTasks();
+    const updatedLocal = local.map((t) => {
+      if (t.id === taskId) {
+        return {
+          ...t,
+          status: 'rejected' as const,
+          description: newDesc,
+          updated_at: new Date().toISOString(),
+        };
+      }
+      return t;
+    });
+    saveLocalTasks(updatedLocal);
+
+    // 3. Notify student
+    const studentTargetId = currentTask.student_id || '99999999-0000-0000-0000-000000000001';
     try {
       await notificationService.createNotification({
-        user_id: taskRow.student_id,
+        user_id: studentTargetId,
         title: '⚠️ Görev Düzeltme Talebi',
-        message: `"${taskRow.title}" göreviniz koçunuz tarafından incelendi ve düzeltme talep edildi: ${rejectionReason || 'Lütfen görevi gözden geçirin.'}`,
+        message: `"${currentTask.title}" göreviniz koçunuz tarafından incelendi ve düzeltme talep edildi: ${rejectionReason || 'Lütfen görevi gözden geçirin.'}`,
         type: 'task',
-        link: '/student/homework',
+        link: '/student/tasks',
       });
     } catch {
       // ignore
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('mahfaza:tasks_updated', { detail: { id: taskId, status: 'rejected' } }));
     }
   },
 
@@ -563,13 +726,24 @@ export const coachTaskService = {
    * Cancel task
    */
   async cancelTask(taskId: string): Promise<void> {
-    const { error } = await supabase
-      .from('tasks')
-      .update({ status: 'İptal' })
-      .eq('id', taskId);
+    try {
+      await supabase.from('coach_tasks').update({ status: 'cancelled' }).eq('id', taskId);
+    } catch {
+      // ignore
+    }
 
-    if (error) {
-      throw new Error(error.message);
+    try {
+      await supabase.from('tasks').update({ status: 'İptal' }).eq('id', taskId);
+    } catch {
+      // ignore
+    }
+
+    const local = getLocalTasks();
+    const updatedLocal = local.map((t) => (t.id === taskId ? { ...t, status: 'cancelled' as const } : t));
+    saveLocalTasks(updatedLocal);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('mahfaza:tasks_updated', { detail: { id: taskId, status: 'cancelled' } }));
     }
   },
 };

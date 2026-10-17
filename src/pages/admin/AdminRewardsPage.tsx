@@ -48,6 +48,10 @@ export const AdminRewardsPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 1500);
+    return () => clearTimeout(safetyTimer);
   }, [loadData]);
 
   const handleCreateReward = async (e: React.FormEvent) => {

@@ -7,7 +7,8 @@ import { homeworkService } from '../../services/homeworkService';
 import { examService } from '../../services/examService';
 import { subscriptionService } from '../../services/subscriptionService';
 import { announcementService } from '../../services/announcementService';
-import { StudentXPData, Homework, ExamResult, ScheduleItem, UserSubscription, Announcement } from '../../types';
+import { coachTaskService } from '../../services/coachTaskService';
+import { StudentXPData, Homework, CoachTask, ExamResult, ScheduleItem, UserSubscription, Announcement } from '../../types';
 import { calculateLevel, DAILY_XP_HARD_CAP, XP_EARNING_ACTIONS, previewAwardCalculation } from '../../utils/xpEngine';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -47,6 +48,7 @@ export const StudentDashboardPage: React.FC = () => {
   const { user, profile } = useAuth();
   const [xpData, setXpData] = useState<StudentXPData | null>(null);
   const [homeworks, setHomeworks] = useState<Homework[]>([]);
+  const [coachTasks, setCoachTasks] = useState<CoachTask[]>([]);
   const [examResults, setExamResults] = useState<ExamResult[]>([]);
   const [todaySchedule, setTodaySchedule] = useState<ScheduleItem[]>([]);
   const [subscription, setSubscription] = useState<UserSubscription | null>(null);
@@ -61,40 +63,57 @@ export const StudentDashboardPage: React.FC = () => {
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
   const loadStudentData = useCallback(async () => {
-    if (!user?.id && !profile?.id) return;
+    if (!user?.id && !profile?.id) {
+      setLoading(false);
+      return;
+    }
+
     try {
-      setLoading(true);
       const studentPrimaryId = profile?.id || user?.id || '';
       const studentSecondaryId = user?.id !== profile?.id ? user?.id : undefined;
 
-      const [xp, hw, exams, schedule, sub, annList] = await Promise.all([
-        xpService.getStudentXP(studentPrimaryId, studentSecondaryId).catch(() => null),
-        homeworkService.getHomeworks().catch(() => []),
-        examService.getStudentExamResults(studentPrimaryId, studentSecondaryId).catch(() => []),
-        academicService.getMasterSchedule().catch(() => []),
-        subscriptionService.getUserSubscription(studentPrimaryId).catch(() => null),
-        announcementService.getAnnouncements('student').catch(() => []),
-      ]);
+      const fetchPromise = (async () => {
+        const [xp, hw, cTasks, exams, schedule, sub, annList] = await Promise.all([
+          xpService.getStudentXP(studentPrimaryId, studentSecondaryId).catch(() => null),
+          homeworkService.getHomeworks().catch(() => []),
+          coachTaskService.getTasksForStudent(studentPrimaryId, {
+            email: user?.email,
+            profileId: profile?.id,
+          }).catch(() => []),
+          examService.getStudentExamResults(studentPrimaryId, studentSecondaryId).catch(() => []),
+          academicService.getMasterSchedule().catch(() => []),
+          subscriptionService.getUserSubscription(studentPrimaryId).catch(() => null),
+          announcementService.getAnnouncements('student').catch(() => []),
+        ]);
 
-      setXpData(xp);
-      setHomeworks((hw || []).slice(0, 5));
-      setExamResults((exams || []).slice(0, 5));
-      setSubscription(sub);
-      setAnnouncements((annList || []).slice(0, 3));
+        setXpData(xp);
+        setHomeworks((hw || []).slice(0, 5));
+        setCoachTasks((cTasks || []).filter((t) => t.status === 'pending' || (t.status as string) === 'Bekliyor').slice(0, 5));
+        setExamResults((exams || []).slice(0, 5));
+        setSubscription(sub);
+        setAnnouncements((annList || []).slice(0, 3));
 
-      // Filter schedule for today (Monday = 1, Sunday = 7)
-      const currentDay = new Date().getDay();
-      const mappedDay = currentDay === 0 ? 7 : currentDay;
-      setTodaySchedule((schedule || []).filter((s) => s.day_of_week === mappedDay));
+        // Filter schedule for today (Monday = 1, Sunday = 7)
+        const currentDay = new Date().getDay();
+        const mappedDay = currentDay === 0 ? 7 : currentDay;
+        setTodaySchedule((schedule || []).filter((s) => s.day_of_week === mappedDay));
+      })();
+
+      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 1200));
+      await Promise.race([fetchPromise, timeoutPromise]);
     } catch {
       // Graceful fallback for offline or schema cache sync
     } finally {
       setLoading(false);
     }
-  }, [user?.id, profile?.id]);
+  }, [user?.id, user?.email, profile?.id]);
 
   useEffect(() => {
     loadStudentData();
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 1500);
+
     const handleLiveSync = () => {
       loadStudentData();
     };
@@ -103,12 +122,17 @@ export const StudentDashboardPage: React.FC = () => {
     window.addEventListener('mahfaza:exam-updated', handleLiveSync);
     window.addEventListener('mahfaza:new_notification', handleLiveSync);
     window.addEventListener('mahfaza:counts-updated', handleLiveSync);
+    window.addEventListener('mahfaza:task_created', handleLiveSync);
+    window.addEventListener('mahfaza:tasks_updated', handleLiveSync);
     return () => {
+      clearTimeout(safetyTimer);
       window.removeEventListener('mahfaza:xp-updated', handleLiveSync);
       window.removeEventListener('mahfaza:package-upgraded', handleLiveSync);
       window.removeEventListener('mahfaza:exam-updated', handleLiveSync);
       window.removeEventListener('mahfaza:new_notification', handleLiveSync);
       window.removeEventListener('mahfaza:counts-updated', handleLiveSync);
+      window.removeEventListener('mahfaza:task_created', handleLiveSync);
+      window.removeEventListener('mahfaza:tasks_updated', handleLiveSync);
     };
   }, [loadStudentData]);
 
@@ -488,19 +512,50 @@ export const StudentDashboardPage: React.FC = () => {
 
       {/* Homeworks & Recent Exams */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Homeworks */}
+        {/* Active Tasks & Homeworks */}
         <Card
-          title="Aktif Ödevler"
-          subtitle="Teslim tarihi yaklaşan akademik görevler"
+          title="Aktif Koçluk Görevleri & Ödevler"
+          subtitle="Teslim tarihi yaklaşan koçluk görevleri ve branş ödevleri"
+          action={
+            <Link to="/student/homework" className="text-xs font-semibold text-amber-600 hover:text-amber-700">
+              Tümünü Gör &rarr;
+            </Link>
+          }
         >
-          {homeworks.length === 0 ? (
+          {coachTasks.length === 0 && homeworks.length === 0 ? (
             <EmptyState
-              title="Aktif Ödev Yok"
-              description="Şu an için teslimi bekleyen bir ödeviniz bulunmuyor."
+              title="Aktif Görev veya Ödev Yok"
+              description="Şu an için teslimi bekleyen bir koçluk göreviniz veya ders ödeviniz bulunmuyor."
               icon={<BookOpen className="w-6 h-6 text-slate-400" />}
             />
           ) : (
             <div className="divide-y divide-slate-200/80">
+              {/* Coach Tasks First */}
+              {coachTasks.map((task) => (
+                <div key={task.id} className="py-3 flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-xs font-bold text-slate-800">{task.title}</h4>
+                      <Badge variant="warning">Koç Görevi</Badge>
+                    </div>
+                    {task.description && (
+                      <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">{task.description}</p>
+                    )}
+                    <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-1">
+                      <span className="text-amber-700 font-bold font-mono">+{task.xp_reward} XP</span>
+                      <span aria-hidden="true">·</span>
+                      <span>Son Teslim: {new Date(task.due_date).toLocaleDateString('tr-TR')}</span>
+                    </div>
+                  </div>
+                  <Link to="/student/homework">
+                    <Button variant="outline" size="sm">
+                      Teslim Et
+                    </Button>
+                  </Link>
+                </div>
+              ))}
+
+              {/* Homeworks */}
               {homeworks.map((hw) => (
                 <div key={hw.id} className="py-3 flex items-start justify-between gap-3">
                   <div>
@@ -512,7 +567,7 @@ export const StudentDashboardPage: React.FC = () => {
                       <span>Son Teslim: {new Date(hw.due_at).toLocaleDateString('tr-TR')}</span>
                     </div>
                   </div>
-                  <Badge variant="warning">Bekliyor</Badge>
+                  <Badge variant="neutral">Ödev</Badge>
                 </div>
               ))}
             </div>
